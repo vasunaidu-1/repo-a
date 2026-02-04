@@ -10,14 +10,26 @@ on:
         type: choice
         options: [deployment, rollback]
         default: deployment
+
       target_repos:
-        description: "Comma separated: all | repo-a | repo-b | repo-c | repo-a,repo-b"
-        required: true
+        type: choice
+        description: "Select target repositories"
+        options:
+          - all
+          - repo-a
+          - repo-b
+          - repo-c
+          - repo-a,repo-b
+          - repo-a,repo-c
+          - repo-b,repo-c
+          - repo-a,repo-b,repo-c
         default: all
+
       environment:
         type: choice
         options: [prod-west, prod-east]
         default: prod-west
+
       region:
         type: choice
         options: [us-west-2, us-east-1]
@@ -66,12 +78,16 @@ jobs:
           PLAN_JSON='[]'
 
           echo "## 🚀 ${ACTION^} Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Target repos:** $TARGET" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Region:** $REGION" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Action | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|--------|---------|" >> "$GITHUB_STEP_SUMMARY"
 
           for repo in repo-a repo-b repo-c; do
+            # If target is not 'all', check membership
             if [[ "$TARGET" != "all" && ! ",$TARGET," =~ ",$repo," ]]; then
               echo "| $repo | Skipped | NA |" >> "$GITHUB_STEP_SUMMARY"
               continue
