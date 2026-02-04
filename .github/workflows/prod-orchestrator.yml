@@ -21,7 +21,7 @@ jobs:
 # ORCHESTRATE (SUMMARY + PLAN)
 # =========================================================
   orchestrate:
-    name: "📋 Orchestrate Release"
+    name: " Orchestrate Release"
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
@@ -54,7 +54,7 @@ jobs:
           REGION="${{ inputs.region }}"
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
 
-          echo "## 🚀 Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "##  Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "This workflow orchestrates a **${{ inputs.action }}** across multiple repositories." >> "$GITHUB_STEP_SUMMARY"
           echo "Deployments are executed **sequentially**, each protected by a manual approval gate." >> "$GITHUB_STEP_SUMMARY"
@@ -85,7 +85,7 @@ jobs:
 # APPROVAL + DEPLOY repo-a
 # =========================================================
   approval-repo-a:
-    name: "🛑 Approval • repo-a"
+    name: " Approval • repo-a"
     needs: orchestrate
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -93,7 +93,7 @@ jobs:
       - run: echo "Approved repo-a"
 
   deploy-repo-a:
-    name: "🚀 Deploy • repo-a"
+    name: " Deploy • repo-a"
     needs:
       - orchestrate
       - approval-repo-a
@@ -117,7 +117,7 @@ jobs:
 # APPROVAL + DEPLOY repo-b
 # =========================================================
   approval-repo-b:
-    name: "🛑 Approval • repo-b"
+    name: " Approval • repo-b"
     needs: deploy-repo-a
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -125,7 +125,7 @@ jobs:
       - run: echo "Approved repo-b"
 
   deploy-repo-b:
-    name: "🚀 Deploy • repo-b"
+    name: " Deploy • repo-b"
     needs:
       - orchestrate
       - approval-repo-b
@@ -149,7 +149,7 @@ jobs:
 # APPROVAL + DEPLOY repo-c
 # =========================================================
   approval-repo-c:
-    name: "🛑 Approval • repo-c"
+    name: " Approval • repo-c"
     needs: deploy-repo-b
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -157,7 +157,7 @@ jobs:
       - run: echo "Approved repo-c"
 
   deploy-repo-c:
-    name: "🚀 Deploy • repo-c"
+    name: " Deploy • repo-c"
     needs:
       - orchestrate
       - approval-repo-c
