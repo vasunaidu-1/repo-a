@@ -36,7 +36,7 @@ on:
 
 jobs:
 # =========================================================
-# ORCHESTRATE
+# ORCHESTRATE + SUMMARY
 # =========================================================
   orchestrate:
     name: Orchestrate Release
@@ -69,13 +69,28 @@ jobs:
       - id: plan
         shell: bash
         run: |
+          set -euo pipefail
+
           REGION="${{ inputs.region }}"
           TARGET="${{ inputs.target_repos }}"
           ACTION="${{ inputs.action }}"
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
+
           PLAN_JSON='[]'
 
-          echo "## 🚀 ${ACTION^} Summary" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$ACTION" = "rollback" ]; then
+            TITLE="Rollback Summary"
+            ACTION_TXT="Rollback"
+          else
+            TITLE="Deployment Summary"
+            ACTION_TXT="Deploy"
+          fi
+
+          echo "## 🚀 $TITLE" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "This workflow performs a **$ACTION_TXT** across selected repositories." >> "$GITHUB_STEP_SUMMARY"
+          echo "Each repository is executed sequentially with manual approval." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Target repos:** $TARGET" >> "$GITHUB_STEP_SUMMARY"
           echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
           echo "**Region:** $REGION" >> "$GITHUB_STEP_SUMMARY"
@@ -90,7 +105,12 @@ jobs:
             fi
 
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
-            echo "| $repo | $ACTION | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$VERSION" = "null" ]; then
+              echo "| $repo | Skipped | NA |" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            echo "| $repo | $ACTION_TXT | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
             PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
           done
 
@@ -111,14 +131,18 @@ jobs:
   deploy-repo-a:
     name: Deploy/Rollback • repo-a
     needs: approval-repo-a
-    if: ${{ inputs.target_repos == 'all' || contains(inputs.target_repos, 'repo-a') }}
     runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-a") | .version')
 
-          curl -X POST \
+          if [ -z "$VERSION" ]; then
+            echo "repo-a not selected – skipping"
+            exit 0
+          fi
+
+          curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
@@ -129,7 +153,7 @@ jobs:
 # =========================================================
   approval-repo-b:
     name: Approval • repo-b
-    needs: orchestrate
+    needs: deploy-repo-a
     if: ${{ inputs.target_repos == 'all' || contains(inputs.target_repos, 'repo-b') }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -139,14 +163,18 @@ jobs:
   deploy-repo-b:
     name: Deploy/Rollback • repo-b
     needs: approval-repo-b
-    if: ${{ inputs.target_repos == 'all' || contains(inputs.target_repos, 'repo-b') }}
     runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-b") | .version')
 
-          curl -X POST \
+          if [ -z "$VERSION" ]; then
+            echo "repo-b not selected – skipping"
+            exit 0
+          fi
+
+          curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
@@ -157,7 +185,7 @@ jobs:
 # =========================================================
   approval-repo-c:
     name: Approval • repo-c
-    needs: orchestrate
+    needs: deploy-repo-b
     if: ${{ inputs.target_repos == 'all' || contains(inputs.target_repos, 'repo-c') }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -167,14 +195,18 @@ jobs:
   deploy-repo-c:
     name: Deploy/Rollback • repo-c
     needs: approval-repo-c
-    if: ${{ inputs.target_repos == 'all' || contains(inputs.target_repos, 'repo-c') }}
     runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-c") | .version')
 
-          curl -X POST \
+          if [ -z "$VERSION" ]; then
+            echo "repo-c not selected – skipping"
+            exit 0
+          fi
+
+          curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
