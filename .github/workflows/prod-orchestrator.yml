@@ -13,7 +13,6 @@ on:
 
       target_repos:
         type: choice
-        description: Select target repositories
         options:
           - all
           - repo-a
@@ -37,7 +36,7 @@ on:
 
 jobs:
 # =========================================================
-# ORCHESTRATE (PLAN + SUMMARY)
+# ORCHESTRATE
 # =========================================================
   orchestrate:
     name: Orchestrate Release
@@ -56,6 +55,13 @@ jobs:
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.region }}
+
       - name: Download manifest
         run: |
           aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
@@ -69,20 +75,9 @@ jobs:
           TARGET="${{ inputs.target_repos }}"
           ACTION="${{ inputs.action }}"
 
-          if [ ! -f manifest.yaml ]; then
-            echo "❌ manifest.yaml not found"
-            exit 1
-          fi
-
-          DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml || echo "{}")
-          if [ "$DATA" = "{}" ]; then
-            echo "❌ Region $REGION not found in manifest"
-            exit 1
-          fi
-
+          DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
           PLAN_JSON='[]'
 
-          # ---------------- SUMMARY (THEORY) ----------------
           if [ "$ACTION" = "rollback" ]; then
             TITLE="Rollback Summary"
             ACTION_TEXT="rollback"
@@ -95,8 +90,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### 📖 Overview" >> "$GITHUB_STEP_SUMMARY"
           echo "This workflow orchestrates a **$ACTION_TEXT** across selected repositories." >> "$GITHUB_STEP_SUMMARY"
-          echo "Each repository is processed **independently**, protected by a **manual approval gate**." >> "$GITHUB_STEP_SUMMARY"
-          echo "Only repositories explicitly selected at trigger time are executed." >> "$GITHUB_STEP_SUMMARY"
+          echo "Each repository runs independently with a manual approval gate." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Target repositories:** $TARGET" >> "$GITHUB_STEP_SUMMARY"
           echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
@@ -123,7 +117,7 @@ jobs:
           done
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "_This summary is generated automatically for audit and traceability._" >> "$GITHUB_STEP_SUMMARY"
+          echo "_Auto-generated for audit and traceability._" >> "$GITHUB_STEP_SUMMARY"
 
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w 0)" >> "$GITHUB_OUTPUT"
 
@@ -149,7 +143,7 @@ jobs:
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-a") | .version')
           [ -z "$VERSION" ] && exit 0
-          echo "Executing repo-a ($VERSION)"
+          echo "Executing repo-a $VERSION"
 
 # =========================================================
 # repo-b
@@ -173,7 +167,7 @@ jobs:
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-b") | .version')
           [ -z "$VERSION" ] && exit 0
-          echo "Executing repo-b ($VERSION)"
+          echo "Executing repo-b $VERSION"
 
 # =========================================================
 # repo-c
@@ -197,4 +191,4 @@ jobs:
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-c") | .version')
           [ -z "$VERSION" ] && exit 0
-          echo "Executing repo-c ($VERSION)"
+          echo "Executing repo-c $VERSION"
