@@ -13,7 +13,7 @@ on:
 
       target_repos:
         type: choice
-        description: "Select target repositories"
+        description: Select target repositories
         options:
           - all
           - repo-a
@@ -63,14 +63,26 @@ jobs:
       - id: plan
         shell: bash
         run: |
+          set -euo pipefail
+
           REGION="${{ inputs.region }}"
           TARGET="${{ inputs.target_repos }}"
           ACTION="${{ inputs.action }}"
 
-          DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
+          if [ ! -f manifest.yaml ]; then
+            echo "❌ manifest.yaml not found"
+            exit 1
+          fi
+
+          DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml || echo "{}")
+          if [ "$DATA" = "{}" ]; then
+            echo "❌ Region $REGION not found in manifest"
+            exit 1
+          fi
+
           PLAN_JSON='[]'
 
-          # ---------------- SUMMARY (THEORY PART) ----------------
+          # ---------------- SUMMARY (THEORY) ----------------
           if [ "$ACTION" = "rollback" ]; then
             TITLE="Rollback Summary"
             ACTION_TEXT="rollback"
@@ -82,7 +94,7 @@ jobs:
           echo "## 🚀 $TITLE" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### 📖 Overview" >> "$GITHUB_STEP_SUMMARY"
-          echo "This workflow orchestrates a **$ACTION_TEXT** across multiple repositories." >> "$GITHUB_STEP_SUMMARY"
+          echo "This workflow orchestrates a **$ACTION_TEXT** across selected repositories." >> "$GITHUB_STEP_SUMMARY"
           echo "Each repository is processed **independently**, protected by a **manual approval gate**." >> "$GITHUB_STEP_SUMMARY"
           echo "Only repositories explicitly selected at trigger time are executed." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -100,8 +112,8 @@ jobs:
               continue
             fi
 
-            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
-            if [[ "$VERSION" == "null" || "$VERSION" == "not_applicable" ]]; then
+            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
+            if [ -z "$VERSION" ]; then
               echo "| $repo | Skipped | NA |" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
@@ -127,8 +139,8 @@ jobs:
     steps:
       - run: echo "Approved repo-a"
 
-  deploy-repo-a:
-    name: ${{ inputs.action == 'rollback' && 'Rollback • repo-a' || 'Deploy • repo-a' }}
+  apply-repo-a:
+    name: Apply Change • repo-a
     needs: approval-repo-a
     if: ${{ inputs.target_repos == 'all' || contains(inputs.target_repos, 'repo-a') }}
     runs-on: ubuntu-latest
@@ -151,8 +163,8 @@ jobs:
     steps:
       - run: echo "Approved repo-b"
 
-  deploy-repo-b:
-    name: ${{ inputs.action == 'rollback' && 'Rollback • repo-b' || 'Deploy • repo-b' }}
+  apply-repo-b:
+    name: Apply Change • repo-b
     needs: approval-repo-b
     if: ${{ inputs.target_repos == 'all' || contains(inputs.target_repos, 'repo-b') }}
     runs-on: ubuntu-latest
@@ -175,8 +187,8 @@ jobs:
     steps:
       - run: echo "Approved repo-c"
 
-  deploy-repo-c:
-    name: ${{ inputs.action == 'rollback' && 'Rollback • repo-c' || 'Deploy • repo-c' }}
+  apply-repo-c:
+    name: Apply Change • repo-c
     needs: approval-repo-c
     if: ${{ inputs.target_repos == 'all' || contains(inputs.target_repos, 'repo-c') }}
     runs-on: ubuntu-latest
