@@ -1,0 +1,136 @@
+name: Prod Orchestrator
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        options: [deployment, rollback]
+        default: deployment
+      environment:
+        type: choice
+        options: [prod-west, prod-east]
+        default: prod-west
+      region:
+        type: choice
+        options: [us-west-2, us-east-1]
+        default: us-west-2
+
+jobs:
+# ---------------- SUMMARY ----------------
+  summary:
+    runs-on: ubuntu-latest
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x yq_linux_amd64
+          sudo mv yq_linux_amd64 /usr/local/bin/yq
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.region }}
+
+      - name: Download manifest from S3
+        run: |
+          aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
+
+      - id: plan
+        name: Build summary
+        run: |
+          DATA=$(yq -o=json ".\"${{ inputs.region }}\"" manifest.yaml)
+
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Action:** ${{ inputs.action }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Region:** ${{ inputs.region }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Repo | Status | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+
+          PLAN="[]"
+
+          for repo in repo-a repo-b repo-c; do
+            V=$(echo "$DATA" | jq -r ".\"$repo\".version")
+            if [[ "$V" == "not_applicable" || "$V" == "null" ]]; then
+              echo "| $repo | Skipped | NA |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| $repo | Deploy | v$V |" >> $GITHUB_STEP_SUMMARY
+              PLAN=$(echo "$PLAN" | jq ". + [{repo:\"$repo\",version:\"$V\"}]")
+            fi
+          done
+
+          echo "plan=$PLAN" >> $GITHUB_OUTPUT
+
+# ---------------- APPROVAL + DEPLOY repo-a ----------------
+  approval-repo-a:
+    needs: summary
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - run: echo "Deployment approved for repo-a"
+
+  deploy-repo-a:
+    needs: approval-repo-a
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          VERSION=$(jq -r '.[] | select(.repo=="repo-a") | .version' <<< '${{ needs.summary.outputs.plan }}')
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\"}}"
+
+# ---------------- APPROVAL + DEPLOY repo-b ----------------
+  approval-repo-b:
+    needs: deploy-repo-a
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - run: echo "Deployment approved for repo-b"
+
+  deploy-repo-b:
+    needs: approval-repo-b
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          VERSION=$(jq -r '.[] | select(.repo=="repo-b") | .version' <<< '${{ needs.summary.outputs.plan }}')
+          [ -z "$VERSION" ] && exit 0
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\"}}"
+
+# ---------------- APPROVAL + DEPLOY repo-c ----------------
+  approval-repo-c:
+    needs: deploy-repo-b
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - run: echo "Deployment approved for repo-c"
+
+  deploy-repo-c:
+    needs: approval-repo-c
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          VERSION=$(jq -r '.[] | select(.repo=="repo-c") | .version' <<< '${{ needs.summary.outputs.plan }}')
+          [ -z "$VERSION" ] && exit 0
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\"}}"
