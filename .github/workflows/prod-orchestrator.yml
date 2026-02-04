@@ -53,7 +53,9 @@ jobs:
         shell: bash
         run: |
           REGION="${{ inputs.region }}"
-          DATA=$(yq -o=json ".[$REGION]" manifest.yaml)
+
+          # IMPORTANT: region key must be quoted (us-east-1 has '-')
+          DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
 
           echo "## 🚀 Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "**Action:** ${{ inputs.action }}" >> "$GITHUB_STEP_SUMMARY"
