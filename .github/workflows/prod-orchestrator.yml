@@ -1,5 +1,10 @@
 name: Prod Orchestrator
 
+run-name: >
+  prod-deploy / ${{ inputs.action == 'rollback' && 'rollback' || 'deploy' }}
+  — ${{ inputs.action }}
+  — ${{ github.ref_name }}
+
 on:
   workflow_dispatch:
     inputs:
