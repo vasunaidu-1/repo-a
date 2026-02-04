@@ -66,13 +66,7 @@ jobs:
           PLAN_JSON='[]'
 
           echo "## 🚀 ${ACTION^} Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "This workflow performs a **${ACTION}** operation." >> "$GITHUB_STEP_SUMMARY"
-          echo "Only selected repositories are affected." >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Target repos:** $TARGET" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Region:** $REGION" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Action | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|--------|---------|" >> "$GITHUB_STEP_SUMMARY"
@@ -96,12 +90,11 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w 0)" >> "$GITHUB_OUTPUT"
 
 # =========================================================
-# APPROVAL + EXECUTION repo-a
+# repo-a
 # =========================================================
   approval-repo-a:
     name: Approval • repo-a
     needs: orchestrate
-    if: contains(fromJson(base64Decode(needs.orchestrate.outputs.plan_b64)), 'repo-a')
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
@@ -115,7 +108,7 @@ jobs:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-a") | .version')
-          [ -z "$VERSION" ] && exit 0
+          [ -z "$VERSION" ] && echo "repo-a not selected" && exit 0
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
@@ -129,7 +122,6 @@ jobs:
   approval-repo-b:
     name: Approval • repo-b
     needs: deploy-repo-a
-    if: contains(fromJson(base64Decode(needs.orchestrate.outputs.plan_b64)), 'repo-b')
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
@@ -143,7 +135,7 @@ jobs:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-b") | .version')
-          [ -z "$VERSION" ] && exit 0
+          [ -z "$VERSION" ] && echo "repo-b not selected" && exit 0
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
@@ -157,7 +149,6 @@ jobs:
   approval-repo-c:
     name: Approval • repo-c
     needs: deploy-repo-b
-    if: contains(fromJson(base64Decode(needs.orchestrate.outputs.plan_b64)), 'repo-c')
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
@@ -171,7 +162,7 @@ jobs:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-c") | .version')
-          [ -z "$VERSION" ] && exit 0
+          [ -z "$VERSION" ] && echo "repo-c not selected" && exit 0
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
