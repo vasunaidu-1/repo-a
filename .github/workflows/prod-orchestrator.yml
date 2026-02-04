@@ -21,6 +21,7 @@ jobs:
 # ORCHESTRATE (SUMMARY + PLAN)
 # =========================================================
   orchestrate:
+    name: "📋 Orchestrate Release"
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
@@ -54,7 +55,11 @@ jobs:
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
 
           echo "## 🚀 Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Action:** ${{ inputs.action }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "This workflow orchestrates a **${{ inputs.action }}** across multiple repositories." >> "$GITHUB_STEP_SUMMARY"
+          echo "Deployments are executed **sequentially**, each protected by a manual approval gate." >> "$GITHUB_STEP_SUMMARY"
+          echo "Only repositories with valid versions in the manifest are deployed." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
           echo "**Region:** $REGION" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -73,9 +78,6 @@ jobs:
             fi
           done
 
-          echo "Final plan:"
-          echo "$PLAN_JSON" | jq .
-
           PLAN_B64=$(echo "$PLAN_JSON" | base64 -w 0)
           echo "plan_b64=$PLAN_B64" >> "$GITHUB_OUTPUT"
 
@@ -83,6 +85,7 @@ jobs:
 # APPROVAL + DEPLOY repo-a
 # =========================================================
   approval-repo-a:
+    name: "🛑 Approval • repo-a"
     needs: orchestrate
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -90,6 +93,7 @@ jobs:
       - run: echo "Approved repo-a"
 
   deploy-repo-a:
+    name: "🚀 Deploy • repo-a"
     needs:
       - orchestrate
       - approval-repo-a
@@ -101,10 +105,7 @@ jobs:
           PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-a") | .version')
 
-          if [[ -z "$VERSION" ]]; then
-            echo "❌ repo-a version missing"
-            exit 1
-          fi
+          [ -z "$VERSION" ] && exit 0
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
@@ -116,6 +117,7 @@ jobs:
 # APPROVAL + DEPLOY repo-b
 # =========================================================
   approval-repo-b:
+    name: "🛑 Approval • repo-b"
     needs: deploy-repo-a
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -123,6 +125,7 @@ jobs:
       - run: echo "Approved repo-b"
 
   deploy-repo-b:
+    name: "🚀 Deploy • repo-b"
     needs:
       - orchestrate
       - approval-repo-b
@@ -146,6 +149,7 @@ jobs:
 # APPROVAL + DEPLOY repo-c
 # =========================================================
   approval-repo-c:
+    name: "🛑 Approval • repo-c"
     needs: deploy-repo-b
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -153,6 +157,7 @@ jobs:
       - run: echo "Approved repo-c"
 
   deploy-repo-c:
+    name: "🚀 Deploy • repo-c"
     needs:
       - orchestrate
       - approval-repo-c
