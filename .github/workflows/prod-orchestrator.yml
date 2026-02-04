@@ -34,7 +34,7 @@ on:
         default: us-west-2
 
 # =========================================================
-# ORCHESTRATE + PLAN + SUMMARY
+# ORCHESTRATE (PLAN + SUMMARY + FLAGS)
 # =========================================================
 jobs:
   orchestrate:
@@ -42,6 +42,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
+      run_repo_a: ${{ steps.plan.outputs.run_repo_a }}
+      run_repo_b: ${{ steps.plan.outputs.run_repo_b }}
+      run_repo_c: ${{ steps.plan.outputs.run_repo_c }}
 
     steps:
       - uses: actions/checkout@v4
@@ -76,6 +79,10 @@ jobs:
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
           PLAN='[]'
 
+          run_a=false
+          run_b=false
+          run_c=false
+
           echo "## 🚀 ${ACTION^} Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
@@ -95,9 +102,16 @@ jobs:
 
             echo "| $r | ${ACTION^} | v$V |" >> "$GITHUB_STEP_SUMMARY"
             PLAN=$(echo "$PLAN" | jq ". + [{\"repo\":\"$r\",\"version\":\"$V\"}]")
+
+            [[ "$r" == "repo-a" ]] && run_a=true
+            [[ "$r" == "repo-b" ]] && run_b=true
+            [[ "$r" == "repo-c" ]] && run_c=true
           done
 
           echo "plan_b64=$(echo "$PLAN" | base64 -w0)" >> "$GITHUB_OUTPUT"
+          echo "run_repo_a=$run_a" >> "$GITHUB_OUTPUT"
+          echo "run_repo_b=$run_b" >> "$GITHUB_OUTPUT"
+          echo "run_repo_c=$run_c" >> "$GITHUB_OUTPUT"
 
 # =========================================================
 # repo-a
@@ -105,12 +119,9 @@ jobs:
   repo-a:
     name: Deploy/Rollback • repo-a
     needs: orchestrate
+    if: needs.orchestrate.outputs.run_repo_a == 'true'
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
-    if: >
-      contains(fromJson(
-        decodeBase64(needs.orchestrate.outputs.plan_b64)
-      )[*].repo, 'repo-a')
 
     steps:
       - run: |
@@ -129,12 +140,9 @@ jobs:
   repo-b:
     name: Deploy/Rollback • repo-b
     needs: repo-a
+    if: needs.orchestrate.outputs.run_repo_b == 'true'
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
-    if: >
-      contains(fromJson(
-        decodeBase64(needs.orchestrate.outputs.plan_b64)
-      )[*].repo, 'repo-b')
 
     steps:
       - run: |
@@ -153,12 +161,9 @@ jobs:
   repo-c:
     name: Deploy/Rollback • repo-c
     needs: repo-b
+    if: needs.orchestrate.outputs.run_repo_c == 'true'
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
-    if: >
-      contains(fromJson(
-        decodeBase64(needs.orchestrate.outputs.plan_b64)
-      )[*].repo, 'repo-c')
 
     steps:
       - run: |
