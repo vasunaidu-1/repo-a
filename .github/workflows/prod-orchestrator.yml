@@ -34,17 +34,17 @@ on:
         default: us-west-2
 
 # =========================================================
-# ORCHESTRATE (PLAN + SUMMARY + FLAGS)
+# ORCHESTRATE (PLAN + SUMMARY)
 # =========================================================
 jobs:
   orchestrate:
     name: Orchestrate Release
     runs-on: ubuntu-latest
     outputs:
-      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
       run_repo_a: ${{ steps.plan.outputs.run_repo_a }}
       run_repo_b: ${{ steps.plan.outputs.run_repo_b }}
       run_repo_c: ${{ steps.plan.outputs.run_repo_c }}
+      plan_b64:  ${{ steps.plan.outputs.plan_b64 }}
 
     steps:
       - uses: actions/checkout@v4
@@ -70,15 +70,12 @@ jobs:
 
       - id: plan
         run: |
-          set -e
-
           REGION="${{ inputs.region }}"
           TARGET="${{ inputs.target_repos }}"
           ACTION="${{ inputs.action }}"
-
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
-          PLAN='[]'
 
+          PLAN='[]'
           run_a=false
           run_b=false
           run_c=false
@@ -116,13 +113,19 @@ jobs:
 # =========================================================
 # repo-a
 # =========================================================
-  repo-a:
-    name: Deploy/Rollback • repo-a
+  approval-repo-a:
+    name: Approval • repo-a
     needs: orchestrate
     if: needs.orchestrate.outputs.run_repo_a == 'true'
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
+    steps:
+      - run: echo "Approved repo-a"
 
+  repo-a:
+    name: Deploy/Rollback • repo-a
+    needs: approval-repo-a
+    runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
@@ -137,13 +140,19 @@ jobs:
 # =========================================================
 # repo-b
 # =========================================================
-  repo-b:
-    name: Deploy/Rollback • repo-b
+  approval-repo-b:
+    name: Approval • repo-b
     needs: repo-a
     if: needs.orchestrate.outputs.run_repo_b == 'true'
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
+    steps:
+      - run: echo "Approved repo-b"
 
+  repo-b:
+    name: Deploy/Rollback • repo-b
+    needs: approval-repo-b
+    runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
@@ -158,13 +167,19 @@ jobs:
 # =========================================================
 # repo-c
 # =========================================================
-  repo-c:
-    name: Deploy/Rollback • repo-c
+  approval-repo-c:
+    name: Approval • repo-c
     needs: repo-b
     if: needs.orchestrate.outputs.run_repo_c == 'true'
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
+    steps:
+      - run: echo "Approved repo-c"
 
+  repo-c:
+    name: Deploy/Rollback • repo-c
+    needs: approval-repo-c
+    runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
