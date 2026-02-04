@@ -26,8 +26,7 @@ jobs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install tools
         run: |
@@ -44,17 +43,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ inputs.region }}
 
-      - name: Download manifest from S3
+      - name: Download manifest
         run: |
           aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
       - id: plan
-        name: Build deployment summary
         shell: bash
         run: |
           REGION="${{ inputs.region }}"
-
-          # IMPORTANT: region key must be quoted (us-east-1 has '-')
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
 
           echo "## 🚀 Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
@@ -78,86 +74,106 @@ jobs:
             fi
           done
 
+          echo "Final plan:"
+          echo "$PLAN_JSON" | jq .
+
           PLAN_B64=$(echo "$PLAN_JSON" | base64 -w 0)
           echo "plan_b64=$PLAN_B64" >> "$GITHUB_OUTPUT"
 
 # =========================================================
-# APPROVAL + DEPLOY REPO-A
+# APPROVAL + DEPLOY repo-a
 # =========================================================
   approval-repo-a:
     needs: orchestrate
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment }}
+    environment: ${{ inputs.environment }}
     steps:
-      - run: echo "Deployment approved for repo-a"
+      - run: echo "Approved repo-a"
 
   deploy-repo-a:
     needs: approval-repo-a
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger repo-a deploy
+      - name: Trigger repo-a workflow
         shell: bash
         run: |
+          set -euo pipefail
+
           PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-a") | .version')
 
-          curl -X POST \
+          if [[ -z "$VERSION" ]]; then
+            echo "❌ repo-a version missing"
+            exit 1
+          fi
+
+          curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\"}}"
 
 # =========================================================
-# APPROVAL + DEPLOY REPO-B
+# APPROVAL + DEPLOY repo-b
 # =========================================================
   approval-repo-b:
     needs: deploy-repo-a
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment }}
+    environment: ${{ inputs.environment }}
     steps:
-      - run: echo "Deployment approved for repo-b"
+      - run: echo "Approved repo-b"
 
   deploy-repo-b:
     needs: approval-repo-b
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger repo-b deploy
+      - name: Trigger repo-b workflow
         shell: bash
         run: |
+          set -euo pipefail
+
           PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-b") | .version')
 
-          [ -z "$VERSION" ] && exit 0
+          if [[ -z "$VERSION" ]]; then
+            echo "ℹ️ repo-b skipped"
+            exit 0
+          fi
 
-          curl -X POST \
+          curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\"}}"
 
 # =========================================================
-# APPROVAL + DEPLOY REPO-C
+# APPROVAL + DEPLOY repo-c
 # =========================================================
   approval-repo-c:
     needs: deploy-repo-b
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment }}
+    environment: ${{ inputs.environment }}
     steps:
-      - run: echo "Deployment approved for repo-c"
+      - run: echo "Approved repo-c"
 
   deploy-repo-c:
     needs: approval-repo-c
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger repo-c deploy
+      - name: Trigger repo-c workflow
         shell: bash
         run: |
+          set -euo pipefail
+
           PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-c") | .version')
 
-          [ -z "$VERSION" ] && exit 0
+          if [[ -z "$VERSION" ]]; then
+            echo "ℹ️ repo-c skipped"
+            exit 0
+          fi
 
-          curl -X POST \
+          curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
