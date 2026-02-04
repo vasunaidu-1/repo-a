@@ -54,16 +54,17 @@ jobs:
           REGION="${{ inputs.region }}"
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
 
-          echo "##  Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          ACTION_LABEL=$( [ "${{ inputs.action }}" = "rollback" ] && echo "Rollback" || echo "Deploy" )
+
+          echo "##  ${ACTION_LABEL} Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "This workflow orchestrates a **${{ inputs.action }}** across multiple repositories." >> "$GITHUB_STEP_SUMMARY"
-          echo "Deployments are executed **sequentially**, each protected by a manual approval gate." >> "$GITHUB_STEP_SUMMARY"
-          echo "Only repositories with valid versions in the manifest are deployed." >> "$GITHUB_STEP_SUMMARY"
+          echo "This workflow orchestrates a **${ACTION_LABEL,,}** across multiple repositories." >> "$GITHUB_STEP_SUMMARY"
+          echo "Operations are executed **sequentially**, each protected by a manual approval gate." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
           echo "**Region:** $REGION" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Repo | Status | Version |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Action | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|--------|---------|" >> "$GITHUB_STEP_SUMMARY"
 
           PLAN_JSON='[]'
@@ -73,7 +74,7 @@ jobs:
             if [[ "$VERSION" == "null" || "$VERSION" == "not_applicable" ]]; then
               echo "| $repo | Skipped | NA |" >> "$GITHUB_STEP_SUMMARY"
             else
-              echo "| $repo | Deploy | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| $repo | $ACTION_LABEL | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
               PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
             fi
           done
@@ -82,7 +83,7 @@ jobs:
           echo "plan_b64=$PLAN_B64" >> "$GITHUB_OUTPUT"
 
 # =========================================================
-# APPROVAL + DEPLOY repo-a
+# APPROVAL + DEPLOY / ROLLBACK repo-a
 # =========================================================
   approval-repo-a:
     name: " Approval • repo-a"
@@ -93,28 +94,24 @@ jobs:
       - run: echo "Approved repo-a"
 
   deploy-repo-a:
-    name: " Deploy • repo-a"
-    needs:
-      - orchestrate
-      - approval-repo-a
+    name: "↩/ Apply Change • repo-a"
+    needs: [orchestrate, approval-repo-a]
     runs-on: ubuntu-latest
     steps:
       - shell: bash
         run: |
-          set -euo pipefail
           PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-a") | .version')
-
           [ -z "$VERSION" ] && exit 0
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\"}}"
+            https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-change.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\",\"action\":\"${{ inputs.action }}\"}}"
 
 # =========================================================
-# APPROVAL + DEPLOY repo-b
+# APPROVAL + DEPLOY / ROLLBACK repo-b
 # =========================================================
   approval-repo-b:
     name: " Approval • repo-b"
@@ -125,28 +122,24 @@ jobs:
       - run: echo "Approved repo-b"
 
   deploy-repo-b:
-    name: " Deploy • repo-b"
-    needs:
-      - orchestrate
-      - approval-repo-b
+    name: "↩/ Apply Change • repo-b"
+    needs: [orchestrate, approval-repo-b]
     runs-on: ubuntu-latest
     steps:
       - shell: bash
         run: |
-          set -euo pipefail
           PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-b") | .version')
-
           [ -z "$VERSION" ] && exit 0
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\"}}"
+            https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-change.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\",\"action\":\"${{ inputs.action }}\"}}"
 
 # =========================================================
-# APPROVAL + DEPLOY repo-c
+# APPROVAL + DEPLOY / ROLLBACK repo-c
 # =========================================================
   approval-repo-c:
     name: " Approval • repo-c"
@@ -157,22 +150,18 @@ jobs:
       - run: echo "Approved repo-c"
 
   deploy-repo-c:
-    name: " Deploy • repo-c"
-    needs:
-      - orchestrate
-      - approval-repo-c
+    name: "↩/ Apply Change • repo-c"
+    needs: [orchestrate, approval-repo-c]
     runs-on: ubuntu-latest
     steps:
       - shell: bash
         run: |
-          set -euo pipefail
           PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-c") | .version')
-
           [ -z "$VERSION" ] && exit 0
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\"}}"
+            https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-change.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\",\"action\":\"${{ inputs.action }}\"}}"
