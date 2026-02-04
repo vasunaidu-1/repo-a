@@ -1,6 +1,7 @@
 name: Prod Orchestrator
 
-run-name: prod-${{ inputs.action }}
+run-name: >
+  ${{ inputs.action == 'rollback' && 'prod-rollback' || 'prod-deploy' }}
 
 on:
   workflow_dispatch:
@@ -12,6 +13,7 @@ on:
 
       target_repos:
         type: choice
+        description: "Select target repositories"
         options:
           - all
           - repo-a
@@ -33,18 +35,15 @@ on:
         options: [us-west-2, us-east-1]
         default: us-west-2
 
+jobs:
 # =========================================================
 # ORCHESTRATE (PLAN + SUMMARY)
 # =========================================================
-jobs:
   orchestrate:
     name: Orchestrate Release
     runs-on: ubuntu-latest
     outputs:
-      run_repo_a: ${{ steps.plan.outputs.run_repo_a }}
-      run_repo_b: ${{ steps.plan.outputs.run_repo_b }}
-      run_repo_c: ${{ steps.plan.outputs.run_repo_c }}
-      plan_b64:  ${{ steps.plan.outputs.plan_b64 }}
+      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
 
     steps:
       - uses: actions/checkout@v4
@@ -69,46 +68,45 @@ jobs:
           aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
       - id: plan
+        shell: bash
         run: |
+          set -e
           REGION="${{ inputs.region }}"
           TARGET="${{ inputs.target_repos }}"
           ACTION="${{ inputs.action }}"
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
 
-          PLAN='[]'
-          run_a=false
-          run_b=false
-          run_c=false
+          PLAN_JSON='[]'
 
           echo "## 🚀 ${ACTION^} Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "This workflow orchestrates a **${ACTION}** across selected repositories." >> "$GITHUB_STEP_SUMMARY"
+          echo "Only repositories included in the target list are executed. Others are safely skipped." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Target repos:** $TARGET" >> "$GITHUB_STEP_SUMMARY"
           echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
           echo "**Region:** $REGION" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Target repos:** $TARGET" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Action | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|--------|---------|" >> "$GITHUB_STEP_SUMMARY"
 
-          for r in repo-a repo-b repo-c; do
-            if [[ "$TARGET" != "all" && ! ",$TARGET," =~ ",$r," ]]; then
+          for repo in repo-a repo-b repo-c; do
+            if [[ "$TARGET" != "all" && ! ",$TARGET," =~ ",$repo," ]]; then
+              echo "| $repo | Skipped | NA |" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
 
-            V=$(echo "$DATA" | jq -r ".\"$r\".version")
-            [ "$V" = "null" ] && continue
+            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
+            if [[ "$VERSION" == "null" || -z "$VERSION" ]]; then
+              echo "| $repo | Skipped | NA |" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
 
-            echo "| $r | ${ACTION^} | v$V |" >> "$GITHUB_STEP_SUMMARY"
-            PLAN=$(echo "$PLAN" | jq ". + [{\"repo\":\"$r\",\"version\":\"$V\"}]")
-
-            [[ "$r" == "repo-a" ]] && run_a=true
-            [[ "$r" == "repo-b" ]] && run_b=true
-            [[ "$r" == "repo-c" ]] && run_c=true
+            echo "| $repo | $ACTION | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
+            PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
           done
 
-          echo "plan_b64=$(echo "$PLAN" | base64 -w0)" >> "$GITHUB_OUTPUT"
-          echo "run_repo_a=$run_a" >> "$GITHUB_OUTPUT"
-          echo "run_repo_b=$run_b" >> "$GITHUB_OUTPUT"
-          echo "run_repo_c=$run_c" >> "$GITHUB_OUTPUT"
+          echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w 0)" >> "$GITHUB_OUTPUT"
 
 # =========================================================
 # repo-a
@@ -116,20 +114,24 @@ jobs:
   approval-repo-a:
     name: Approval • repo-a
     needs: orchestrate
-    if: needs.orchestrate.outputs.run_repo_a == 'true'
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
       - run: echo "Approved repo-a"
 
-  repo-a:
+  deploy-repo-a:
     name: Deploy/Rollback • repo-a
-    needs: approval-repo-a
+    needs: [orchestrate, approval-repo-a]
     runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-a") | .version')
+
+          if [ -z "$VERSION" ]; then
+            echo "repo-a not selected – skipping"
+            exit 0
+          fi
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
@@ -142,21 +144,25 @@ jobs:
 # =========================================================
   approval-repo-b:
     name: Approval • repo-b
-    needs: repo-a
-    if: needs.orchestrate.outputs.run_repo_b == 'true'
+    needs: deploy-repo-a
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
       - run: echo "Approved repo-b"
 
-  repo-b:
+  deploy-repo-b:
     name: Deploy/Rollback • repo-b
-    needs: approval-repo-b
+    needs: [orchestrate, approval-repo-b]
     runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-b") | .version')
+
+          if [ -z "$VERSION" ]; then
+            echo "repo-b not selected – skipping"
+            exit 0
+          fi
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
@@ -169,21 +175,25 @@ jobs:
 # =========================================================
   approval-repo-c:
     name: Approval • repo-c
-    needs: repo-b
-    if: needs.orchestrate.outputs.run_repo_c == 'true'
+    needs: deploy-repo-b
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
       - run: echo "Approved repo-c"
 
-  repo-c:
+  deploy-repo-c:
     name: Deploy/Rollback • repo-c
-    needs: approval-repo-c
+    needs: [orchestrate, approval-repo-c]
     runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-c") | .version')
+
+          if [ -z "$VERSION" ]; then
+            echo "repo-c not selected – skipping"
+            exit 0
+          fi
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
