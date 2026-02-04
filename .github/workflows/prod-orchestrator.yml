@@ -1,7 +1,7 @@
 name: Prod Orchestrator
 
 run-name: >
-  prod-deploy/rollback → ${{ inputs.action == 'rollback' && 'rollback' || 'deployment' }}
+  prod orchestrate-deploy/rollback      ${{ inputs.action == 'rollback' && 'rollback' || 'deployment' }}
 on:
   workflow_dispatch:
     inputs:
@@ -23,7 +23,7 @@ jobs:
 # ORCHESTRATE (SUMMARY + PLAN)
 # =========================================================
   orchestrate:
-    name: "📋 Orchestrate Release"
+    name: " Orchestrate Release"
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
@@ -58,9 +58,9 @@ jobs:
 
           ACTION_LABEL=$( [ "${{ inputs.action }}" = "rollback" ] && echo "Rollback" || echo "Deployment" )
 
-          echo "## 🚀 ${ACTION_LABEL} Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "##  ${ACTION_LABEL} Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### 📖 Overview" >> "$GITHUB_STEP_SUMMARY"
+          echo "###  Overview" >> "$GITHUB_STEP_SUMMARY"
           echo "This workflow performs a **${ACTION_LABEL,,}** across multiple repositories." >> "$GITHUB_STEP_SUMMARY"
           echo "Each repository is processed **sequentially** to reduce blast radius." >> "$GITHUB_STEP_SUMMARY"
           echo "Every production change is protected by a **manual approval gate** to ensure safety and auditability." >> "$GITHUB_STEP_SUMMARY"
@@ -69,7 +69,7 @@ jobs:
           echo "**Target Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
           echo "**AWS Region:** $REGION" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### 📦 Execution Plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "###  Execution Plan" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repository | Action | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-----------|--------|---------|" >> "$GITHUB_STEP_SUMMARY"
 
@@ -94,7 +94,7 @@ jobs:
 # APPROVAL + EXECUTION repo-a
 # =========================================================
   approval-repo-a:
-    name: "🛑 Approval • repo-a"
+    name: " Approval • repo-a"
     needs: orchestrate
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -102,7 +102,7 @@ jobs:
       - run: echo "Approved repo-a"
 
   deploy-repo-a:
-    name: "↩/🚀 Apply Change • repo-a"
+    name: "/ Apply Change • repo-a"
     needs: [orchestrate, approval-repo-a]
     runs-on: ubuntu-latest
     steps:
@@ -121,7 +121,7 @@ jobs:
 # APPROVAL + EXECUTION repo-b
 # =========================================================
   approval-repo-b:
-    name: "🛑 Approval • repo-b"
+    name: " Approval • repo-b"
     needs: deploy-repo-a
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -129,7 +129,7 @@ jobs:
       - run: echo "Approved repo-b"
 
   deploy-repo-b:
-    name: "↩/🚀 Apply Change • repo-b"
+    name: " Apply Change • repo-b"
     needs: [orchestrate, approval-repo-b]
     runs-on: ubuntu-latest
     steps:
@@ -148,7 +148,7 @@ jobs:
 # APPROVAL + EXECUTION repo-c
 # =========================================================
   approval-repo-c:
-    name: "🛑 Approval • repo-c"
+    name: " Approval • repo-c"
     needs: deploy-repo-b
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -156,7 +156,7 @@ jobs:
       - run: echo "Approved repo-c"
 
   deploy-repo-c:
-    name: "↩/🚀 Apply Change • repo-c"
+    name: " Apply Change • repo-c"
     needs: [orchestrate, approval-repo-c]
     runs-on: ubuntu-latest
     steps:
