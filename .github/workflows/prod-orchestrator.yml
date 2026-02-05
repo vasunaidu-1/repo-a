@@ -18,7 +18,7 @@ jobs:
 # PLAN & SUMMARY
 # =========================================================
   orchestrate:
-    name: Plan & Summary
+    name: Build Release Plan
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
