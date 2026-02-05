@@ -16,16 +16,16 @@ on:
         default: us-west-2
 
 jobs:
-# ================= PLAN + SUMMARY =================
-  orchestrate:
+# =====================================================
+# 1. PLAN + SUMMARY
+# =====================================================
+  plan:
     name: Plan & Summary
     runs-on: ubuntu-latest
     outputs:
-      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
+      plan_b64: ${{ steps.build.outputs.plan_b64 }}
 
     steps:
-      - uses: actions/checkout@v4
-
       - name: Install tools
         run: |
           sudo apt-get update
@@ -34,7 +34,7 @@ jobs:
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
 
-      - name: AWS creds
+      - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -47,13 +47,13 @@ jobs:
             s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml \
             manifest.yaml
 
-      - id: plan
+      - id: build
         run: |
           REGION="${{ inputs.region }}"
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
           PLAN='[]'
 
-          echo "## 🚀 Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Release Plan" >> $GITHUB_STEP_SUMMARY
           echo "**Action:** ${{ inputs.action }}" >> $GITHUB_STEP_SUMMARY
           echo "**Region:** $REGION" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -72,50 +72,67 @@ jobs:
 
           echo "plan_b64=$(echo "$PLAN" | base64 -w 0)" >> $GITHUB_OUTPUT
 
-# ================= APPROVAL =================
-  approve-release:
-    needs: orchestrate
+# =====================================================
+# 2. ORCHESTRATOR APPROVAL
+# =====================================================
+  approve-plan:
+    name: Approve Release Plan
+    needs: plan
     runs-on: ubuntu-latest
     environment: orchestrator-approval
     steps:
-      - run: echo "Release approved"
+      - run: echo "Release plan approved"
 
-# ================= TRIGGERS =================
+# =====================================================
+# 3. TRIGGER REPO-A (APPROVAL INSIDE REPO)
+# =====================================================
   deploy-repo-a:
-    needs: approve-release
+    needs: approve-plan
     runs-on: ubuntu-latest
     steps:
       - run: |
-          PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
+          PLAN=$(echo "${{ needs.plan.outputs.plan_b64 }}" | base64 -d)
           VER=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-a") | .version')
           [ -z "$VER" ] && exit 0
-          curl -X POST -H "Authorization: token ${{ secrets.ORG1_PAT }}" \
-          -H "Accept: application/vnd.github+json" \
-          https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
-          -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VER\",\"environment\":\"${{ inputs.region }}\"}}"
 
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.ORG1_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VER\",\"environment\":\"prod\",\"region\":\"${{ inputs.region }}\"}}"
+
+# =====================================================
+# 4. TRIGGER REPO-B (APPROVAL INSIDE REPO)
+# =====================================================
   deploy-repo-b:
     needs: deploy-repo-a
     runs-on: ubuntu-latest
     steps:
       - run: |
-          PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
+          PLAN=$(echo "${{ needs.plan.outputs.plan_b64 }}" | base64 -d)
           VER=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-b") | .version')
           [ -z "$VER" ] && exit 0
-          curl -X POST -H "Authorization: token ${{ secrets.ORG1_PAT }}" \
-          -H "Accept: application/vnd.github+json" \
-          https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
-          -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VER\",\"environment\":\"${{ inputs.region }}\"}}"
 
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.ORG1_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VER\",\"environment\":\"prod\",\"region\":\"${{ inputs.region }}\"}}"
+
+# =====================================================
+# 5. TRIGGER REPO-C (APPROVAL INSIDE REPO)
+# =====================================================
   deploy-repo-c:
     needs: deploy-repo-b
     runs-on: ubuntu-latest
     steps:
       - run: |
-          PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
+          PLAN=$(echo "${{ needs.plan.outputs.plan_b64 }}" | base64 -d)
           VER=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-c") | .version')
           [ -z "$VER" ] && exit 0
-          curl -X POST -H "Authorization: token ${{ secrets.ORG1_PAT }}" \
-          -H "Accept: application/vnd.github+json" \
-          https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
-          -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VER\",\"environment\":\"${{ inputs.region }}\"}}"
+
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.ORG1_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VER\",\"environment\":\"prod\",\"region\":\"${{ inputs.region }}\"}}"
