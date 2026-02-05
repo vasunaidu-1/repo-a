@@ -36,6 +36,14 @@ jobs:
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
 
+      # 🔐 REQUIRED AWS AUTH (THIS WAS MISSING)
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
       - name: Download manifest
         run: |
           if [ "${{ inputs.action }}" = "rollback" ]; then
@@ -94,7 +102,7 @@ jobs:
       - run: echo "Release approved"
 
 # =========================================================
-# TRIGGER REPOS (SEQUENTIAL)
+# TRIGGER REPOS
 # =========================================================
   deploy-repo-a:
     name: Trigger repo-a
