@@ -14,24 +14,25 @@ on:
 
 jobs:
 # =========================================================
-# ORCHESTRATE (SUMMARY + PLAN)
+# PLAN & SUMMARY
 # =========================================================
   orchestrate:
+    name: Plan & Summary
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
-      region: ${{ steps.set-region.outputs.region }}
+      region: ${{ steps.region.outputs.region }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set region from environment
-        id: set-region
+      - name: Set region
+        id: region
         run: |
           if [[ "${{ inputs.environment }}" == "prod-west" ]]; then
-            echo "region=us-west-2" >> "$GITHUB_OUTPUT"
+            echo "region=us-west-2" >> $GITHUB_OUTPUT
           else
-            echo "region=us-east-1" >> "$GITHUB_OUTPUT"
+            echo "region=us-east-1" >> $GITHUB_OUTPUT
           fi
 
       - name: Install tools
@@ -42,48 +43,37 @@ jobs:
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ steps.set-region.outputs.region }}
-
       - name: Download manifest
         run: |
           aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
       - id: plan
-        shell: bash
         run: |
           set -euo pipefail
-          REGION="${{ steps.set-region.outputs.region }}"
-          DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
+          DATA=$(yq -o=json ".\"${{ steps.region.outputs.region }}\"" manifest.yaml)
 
-          echo "## 🚀 Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Action:** ${{ inputs.action }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Repo | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
 
-          PLAN_JSON='[]'
-
+          PLAN='[]'
           for repo in repo-a repo-b repo-c; do
-            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
-            if [[ "$VERSION" != "null" && "$VERSION" != "not_applicable" ]]; then
-              echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
-              PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
+            V=$(echo "$DATA" | jq -r ".\"$repo\".version")
+            if [[ "$V" != "null" && "$V" != "not_applicable" ]]; then
+              echo "| $repo | v$V |" >> $GITHUB_STEP_SUMMARY
+              PLAN=$(echo "$PLAN" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$V\"}]")
             fi
           done
 
-          echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w 0)" >> "$GITHUB_OUTPUT"
+          echo "plan_b64=$(echo "$PLAN" | base64 -w0)" >> $GITHUB_OUTPUT
 
 # =========================================================
-# SINGLE APPROVAL (LIKE BEFORE)
+# APPROVE RELEASE PLAN
 # =========================================================
-  approval:
-    name: approve release plan
+  approve-release:
+    name: Approve Release Plan
     needs: orchestrate
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -91,64 +81,133 @@ jobs:
       - run: echo "Release plan approved"
 
 # =========================================================
-# DEPLOY repo-a
+# APPROVE repo-a
+# =========================================================
+  approve-repo-a:
+    name: Approve repo-a
+    needs: approve-release
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - run: echo "repo-a approved"
+
+# =========================================================
+# DEPLOY repo-a (WAIT UNTIL DONE)
 # =========================================================
   deploy-repo-a:
+    name: Deploy repo-a
     needs:
       - orchestrate
-      - approval
+      - approve-repo-a
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          set -e
-          PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
-          VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-a") | .version')
+      - name: Trigger & wait repo-a
+        run: |
+          set -euo pipefail
+          PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
+          VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-a") | .version')
           [ -z "$VERSION" ] && exit 0
 
-          curl -f -X POST \
+          curl -s -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}"
 
+          echo "Waiting for repo-a deployment..."
+          while true; do
+            STATUS=$(curl -s \
+              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+              https://api.github.com/repos/vasunaidu-1/repo-a/actions/runs \
+              | jq -r '.workflow_runs[0].conclusion')
+
+            [[ "$STATUS" == "success" ]] && break
+            [[ "$STATUS" == "failure" ]] && exit 1
+            sleep 15
+          done
+
+# =========================================================
+# APPROVE repo-b
+# =========================================================
+  approve-repo-b:
+    name: Approve repo-b
+    needs: deploy-repo-a
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - run: echo "repo-b approved"
+
 # =========================================================
 # DEPLOY repo-b
 # =========================================================
   deploy-repo-b:
+    name: Deploy repo-b
     needs:
       - orchestrate
-      - deploy-repo-a
+      - approve-repo-b
     runs-on: ubuntu-latest
     steps:
       - run: |
-          set -e
-          PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
-          VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-b") | .version')
+          set -euo pipefail
+          PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
+          VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-b") | .version')
           [ -z "$VERSION" ] && exit 0
 
-          curl -f -X POST \
+          curl -s -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}"
 
+          echo "Waiting for repo-b deployment..."
+          while true; do
+            STATUS=$(curl -s -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+              https://api.github.com/repos/vasunaidu-1/repo-b/actions/runs \
+              | jq -r '.workflow_runs[0].conclusion')
+            [[ "$STATUS" == "success" ]] && break
+            [[ "$STATUS" == "failure" ]] && exit 1
+            sleep 15
+          done
+
+# =========================================================
+# APPROVE repo-c
+# =========================================================
+  approve-repo-c:
+    name: Approve repo-c
+    needs: deploy-repo-b
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - run: echo "repo-c approved"
+
 # =========================================================
 # DEPLOY repo-c
 # =========================================================
   deploy-repo-c:
+    name: Deploy repo-c
     needs:
       - orchestrate
-      - deploy-repo-b
+      - approve-repo-c
     runs-on: ubuntu-latest
     steps:
       - run: |
-          set -e
-          PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
-          VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-c") | .version')
+          set -euo pipefail
+          PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
+          VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-c") | .version')
           [ -z "$VERSION" ] && exit 0
 
-          curl -f -X POST \
+          curl -s -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}"
+
+          echo "Waiting for repo-c deployment..."
+          while true; do
+            STATUS=$(curl -s -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+              https://api.github.com/repos/vasunaidu-1/repo-c/actions/runs \
+              | jq -r '.workflow_runs[0].conclusion')
+            [[ "$STATUS" == "success" ]] && break
+            [[ "$STATUS" == "failure" ]] && exit 1
+            sleep 15
+          done
