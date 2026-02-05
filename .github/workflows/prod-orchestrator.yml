@@ -28,6 +28,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # -------------------------------
+      # Set region from environment
+      # -------------------------------
       - name: Set region
         id: set-region
         run: |
@@ -37,6 +40,9 @@ jobs:
             echo "region=us-east-1" >> "$GITHUB_OUTPUT"
           fi
 
+      # -------------------------------
+      # Install required tools
+      # -------------------------------
       - name: Install tools
         run: |
           sudo apt-get update
@@ -45,6 +51,9 @@ jobs:
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
 
+      # -------------------------------
+      # Configure AWS credentials
+      # -------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -52,11 +61,17 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ steps.set-region.outputs.region }}
 
+      # -------------------------------
+      # Download manifest from S3
+      # -------------------------------
       - name: Download manifest
         run: |
           aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
-      - name: Build deployment plan
+      # -------------------------------
+      # Build deployment / rollback plan
+      # -------------------------------
+      - name: Build release plan and summary
         id: plan
         shell: bash
         run: |
@@ -67,14 +82,22 @@ jobs:
 
           echo "## 🚀 Release Orchestration Overview" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "This pipeline first prepares and validates the release plan based on the deployment manifest." >> "$GITHUB_STEP_SUMMARY"
-          echo "It provides full visibility into what services will be deployed, which versions will be used, and the target environment." >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "After the plan is reviewed and manually approved, the orchestrator triggers deployments for each service sequentially." >> "$GITHUB_STEP_SUMMARY"
-          echo "Each service deployment is further governed by repository-level approvals and controls, ensuring safe, auditable, and controlled production releases." >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
 
+          if [[ "${{ inputs.action }}" == "deployment" ]]; then
+            echo "This pipeline prepares and validates the release plan based on the deployment manifest." >> "$GITHUB_STEP_SUMMARY"
+            echo "It provides full visibility into what services will be deployed, which versions will be used, and the target environment." >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "After the plan is reviewed and manually approved, the orchestrator triggers deployments for each service sequentially." >> "$GITHUB_STEP_SUMMARY"
+            echo "Each service deployment is governed by repository-level approvals and controls, ensuring safe, auditable, and controlled production releases." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "This pipeline prepares and validates a rollback plan based on the rollback manifest." >> "$GITHUB_STEP_SUMMARY"
+            echo "It provides full visibility into which services will be rolled back, which versions will be restored, and the target environment." >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "After the rollback plan is reviewed and manually approved, the orchestrator triggers rollback executions for each service sequentially." >> "$GITHUB_STEP_SUMMARY"
+            echo "Each service rollback is governed by repository-level approvals and controls, ensuring safe, auditable, and controlled production recovery." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Operation:** ${{ inputs.action }}" >> "$GITHUB_STEP_SUMMARY"
           echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -93,12 +116,12 @@ jobs:
           done
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "> ✅ No production deployments will begin until the release plan is explicitly approved." >> "$GITHUB_STEP_SUMMARY"
+          echo "> ✅ This run is explicitly executed as **${{ inputs.action }}** for traceability and audit purposes." >> "$GITHUB_STEP_SUMMARY"
 
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w 0)" >> "$GITHUB_OUTPUT"
 
 # =========================================================
-# APPROVE RELEASE PLAN
+# APPROVE RELEASE / ROLLBACK PLAN
 # =========================================================
   approval:
     name: Approve Release Plan
@@ -106,7 +129,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
-      - run: echo "Release plan approved"
+      - run: echo "Plan approved"
 
 # =========================================================
 # TRIGGER repo-a
