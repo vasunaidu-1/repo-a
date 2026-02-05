@@ -1,3 +1,6 @@
+# ===============================
+# repo-a : .github/workflows/prod-orchestrator.yml
+# ===============================
 name: Prod Orchestrator
 
 run-name: >
@@ -20,7 +23,7 @@ jobs:
 # PLAN + SUMMARY
 # =========================================================
   orchestrate:
-    name: Plan Release
+    name: Plan & Summary
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
@@ -36,7 +39,6 @@ jobs:
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
 
-      # 🔐 REQUIRED AWS AUTH (THIS WAS MISSING)
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -56,9 +58,7 @@ jobs:
         shell: bash
         run: |
           set -e
-
           ENV="${{ inputs.environment }}"
-
           if [[ "$ENV" == "prod-west" ]]; then
             REGION="us-west-2"
           else
@@ -78,12 +78,10 @@ jobs:
 
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
-
             if [[ "$VERSION" == "null" || -z "$VERSION" ]]; then
               echo "| $repo | Skipped |" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
-
             echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
             PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
           done
@@ -91,61 +89,58 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w 0)" >> "$GITHUB_OUTPUT"
 
 # =========================================================
-# ORCHESTRATOR APPROVAL
+# APPROVAL AFTER SUMMARY (ONLY ONCE)
 # =========================================================
-  approve-release:
+  approve-plan:
     name: Approve Release Plan
     needs: orchestrate
     runs-on: ubuntu-latest
-    environment: release-approval
+    environment: orchestrator-approval
     steps:
-      - run: echo "Release approved"
+      - run: echo "Plan approved"
 
 # =========================================================
-# TRIGGER REPOS
+# TRIGGER REPOS (SEQUENTIAL, AFTER APPROVAL)
 # =========================================================
-  deploy-repo-a:
+  trigger-repo-a:
     name: Trigger repo-a
-    needs: approve-release
+    needs: approve-plan
     runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-a") | .version')
           [ -z "$VERSION" ] && exit 0
-
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"action\":\"${{ inputs.action }}\"}}"
 
-  deploy-repo-b:
+  trigger-repo-b:
     name: Trigger repo-b
-    needs: deploy-repo-a
+    needs: trigger-repo-a
     runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-b") | .version')
           [ -z "$VERSION" ] && exit 0
-
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"action\":\"${{ inputs.action }}\"}}"
 
-  deploy-repo-c:
+  trigger-repo-c:
     name: Trigger repo-c
-    needs: deploy-repo-b
+    needs: trigger-repo-b
     runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-c") | .version')
           [ -z "$VERSION" ] && exit 0
-
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
