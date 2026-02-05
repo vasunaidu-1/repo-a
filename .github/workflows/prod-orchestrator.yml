@@ -50,6 +50,7 @@ jobs:
       - id: plan
         shell: bash
         run: |
+          set -euo pipefail
           REGION="${{ inputs.region }}"
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
 
@@ -77,7 +78,7 @@ jobs:
           echo "plan_b64=$PLAN_B64" >> "$GITHUB_OUTPUT"
 
 # =========================================================
-# SINGLE APPROVAL AFTER ORCHESTRATION
+# SINGLE MANUAL APPROVAL
 # =========================================================
   approval:
     needs: orchestrate
@@ -90,7 +91,9 @@ jobs:
 # DEPLOY repo-a
 # =========================================================
   deploy-repo-a:
-    needs: approval
+    needs:
+      - orchestrate
+      - approval
     runs-on: ubuntu-latest
     steps:
       - shell: bash
@@ -99,7 +102,12 @@ jobs:
           PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-a") | .version')
 
-          [ -z "$VERSION" ] && exit 0
+          if [[ -z "$VERSION" ]]; then
+            echo "repo-a skipped"
+            exit 0
+          fi
+
+          echo "Triggering repo-a with version $VERSION"
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
@@ -120,7 +128,12 @@ jobs:
           PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-b") | .version')
 
-          [ -z "$VERSION" ] && exit 0
+          if [[ -z "$VERSION" ]]; then
+            echo "repo-b skipped"
+            exit 0
+          fi
+
+          echo "Triggering repo-b with version $VERSION"
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
@@ -141,7 +154,12 @@ jobs:
           PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-c") | .version')
 
-          [ -z "$VERSION" ] && exit 0
+          if [[ -z "$VERSION" ]]; then
+            echo "repo-c skipped"
+            exit 0
+          fi
+
+          echo "Triggering repo-c with version $VERSION"
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
