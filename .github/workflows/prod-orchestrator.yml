@@ -29,9 +29,9 @@ jobs:
         id: set-region
         run: |
           if [[ "${{ inputs.environment }}" == "prod-west" ]]; then
-            echo "region=us-west-2" >> $GITHUB_OUTPUT
+            echo "region=us-west-2" >> "$GITHUB_OUTPUT"
           else
-            echo "region=us-east-1" >> $GITHUB_OUTPUT
+            echo "region=us-east-1" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install tools
@@ -80,7 +80,7 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w 0)" >> "$GITHUB_OUTPUT"
 
 # =========================================================
-# APPROVE RELEASE PLAN
+# SINGLE APPROVAL (LIKE BEFORE)
 # =========================================================
   approval:
     name: approve release plan
@@ -100,6 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
+          set -e
           PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-a") | .version')
           [ -z "$VERSION" ] && exit 0
@@ -111,26 +112,16 @@ jobs:
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}"
 
 # =========================================================
-# APPROVE repo-b
-# =========================================================
-  approve-repo-b:
-    name: approve repo-b
-    needs: deploy-repo-a
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - run: echo "Approved repo-b"
-
-# =========================================================
 # DEPLOY repo-b
 # =========================================================
   deploy-repo-b:
     needs:
       - orchestrate
-      - approve-repo-b
+      - deploy-repo-a
     runs-on: ubuntu-latest
     steps:
       - run: |
+          set -e
           PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-b") | .version')
           [ -z "$VERSION" ] && exit 0
@@ -142,26 +133,16 @@ jobs:
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}"
 
 # =========================================================
-# APPROVE repo-c
-# =========================================================
-  approve-repo-c:
-    name: approve repo-c
-    needs: deploy-repo-b
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - run: echo "Approved repo-c"
-
-# =========================================================
 # DEPLOY repo-c
 # =========================================================
   deploy-repo-c:
     needs:
       - orchestrate
-      - approve-repo-c
+      - deploy-repo-b
     runs-on: ubuntu-latest
     steps:
       - run: |
+          set -e
           PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-c") | .version')
           [ -z "$VERSION" ] && exit 0
