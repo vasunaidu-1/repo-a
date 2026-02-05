@@ -72,7 +72,7 @@ jobs:
           HAS_C=false
           PLAN_JSON='[]'
 
-          echo "## 🚀 Release Orchestration Overview" >> "$GITHUB_STEP_SUMMARY"
+          echo "##  Release Orchestration Overview" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
           if [[ "${{ inputs.action }}" == "deployment" ]]; then
