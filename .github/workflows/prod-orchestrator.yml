@@ -1,6 +1,3 @@
-# =========================================================
-# repo-a : .github/workflows/prod-orchestrator.yml
-# =========================================================
 name: Prod Orchestrator
 
 run-name: >
@@ -13,14 +10,15 @@ on:
         type: choice
         options: [deployment, rollback]
         default: deployment
-      region:
+
+      environment:
         type: choice
-        options: [us-west-2, us-east-1]
-        default: us-west-2
+        options: [prod-west, prod-east]
+        default: prod-west
 
 jobs:
 # =========================================================
-# PLAN + SUMMARY (BEFORE APPROVAL)
+# PLAN + SUMMARY
 # =========================================================
   orchestrate:
     name: Plan & Summary
@@ -44,27 +42,33 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ inputs.region }}
+          aws-region: us-west-2
 
       - name: Download manifest
         run: |
-          if [ "${{ inputs.action }}" = "rollback" ]; then
-            aws s3 cp s3://mos-deploy-manifests/rollback-manifest.yaml manifest.yaml
-          else
-            aws s3 cp s3://mos-deploy-manifests/deployment-manifest.yaml manifest.yaml
-          fi
+          aws s3 cp \
+            s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml \
+            manifest.yaml
 
       - id: plan
         shell: bash
         run: |
           set -e
-          REGION="${{ inputs.region }}"
+
+          ENV="${{ inputs.environment }}"
+          if [[ "$ENV" == "prod-west" ]]; then
+            REGION="us-west-2"
+          else
+            REGION="us-east-1"
+          fi
+
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
           PLAN_JSON='[]'
 
           echo "## 🚀 Release Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Action:** ${{ inputs.action }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Environment:** $ENV" >> "$GITHUB_STEP_SUMMARY"
           echo "**Region:** $REGION" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
@@ -85,60 +89,69 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w 0)" >> "$GITHUB_OUTPUT"
 
 # =========================================================
-# APPROVAL AFTER SUMMARY
+# APPROVAL AFTER SUMMARY (ONLY ONCE)
 # =========================================================
-  approve-plan:
+  approve-release:
     name: Approve Release Plan
     needs: orchestrate
     runs-on: ubuntu-latest
     environment: orchestrator-approval
     steps:
-      - run: echo "Plan approved"
+      - run: echo "Release approved"
 
 # =========================================================
-# TRIGGER REPOS (SEQUENTIAL)
+# repo-a
 # =========================================================
-  trigger-repo-a:
-    name: Trigger repo-a
-    needs: approve-plan
+  deploy-repo-a:
+    name: Trigger • repo-a
+    needs: approve-release
     runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-a") | .version')
           [ -z "$VERSION" ] && exit 0
+
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.region }}\"}}"
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\"}}"
 
-  trigger-repo-b:
-    name: Trigger repo-b
-    needs: trigger-repo-a
+# =========================================================
+# repo-b
+# =========================================================
+  deploy-repo-b:
+    name: Trigger • repo-b
+    needs: deploy-repo-a
     runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-b") | .version')
           [ -z "$VERSION" ] && exit 0
+
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.region }}\"}}"
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\"}}"
 
-  trigger-repo-c:
-    name: Trigger repo-c
-    needs: trigger-repo-b
+# =========================================================
+# repo-c
+# =========================================================
+  deploy-repo-c:
+    name: Trigger • repo-c
+    needs: deploy-repo-b
     runs-on: ubuntu-latest
     steps:
       - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-c") | .version')
           [ -z "$VERSION" ] && exit 0
+
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.region }}\"}}"
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\"}}"
