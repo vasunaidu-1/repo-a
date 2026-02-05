@@ -1,3 +1,6 @@
+# =========================================================
+# repo-a : .github/workflows/prod-orchestrator.yml
+# =========================================================
 name: Prod Orchestrator
 
 run-name: >
@@ -19,11 +22,11 @@ jobs:
 # =========================================================
 # PLAN + SUMMARY
 # =========================================================
-  plan:
+  orchestrate:
     name: Plan & Summary
     runs-on: ubuntu-latest
     outputs:
-      plan_b64: ${{ steps.build.outputs.plan_b64 }}
+      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
 
     steps:
       - uses: actions/checkout@v4
@@ -49,13 +52,12 @@ jobs:
             s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml \
             manifest.yaml
 
-      - id: build
+      - id: plan
         shell: bash
         run: |
           set -e
           REGION="${{ inputs.region }}"
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
-
           PLAN_JSON='[]'
 
           echo "## 🚀 Release Summary" >> "$GITHUB_STEP_SUMMARY"
@@ -68,7 +70,7 @@ jobs:
 
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // \"not_applicable\"")
-            if [[ "$VERSION" == "not_applicable" || -z "$VERSION" ]]; then
+            if [[ "$VERSION" == "not_applicable" || "$VERSION" == "null" || -z "$VERSION" ]]; then
               echo "| $repo | Skipped |" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
@@ -79,61 +81,58 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w 0)" >> "$GITHUB_OUTPUT"
 
 # =========================================================
-# APPROVAL (AFTER SUMMARY)
+# APPROVAL AFTER SUMMARY
 # =========================================================
-  approve:
+  approve-release:
     name: Approve Release Plan
-    needs: plan
+    needs: orchestrate
     runs-on: ubuntu-latest
     environment: orchestrator-approval
     steps:
       - run: echo "Approved"
 
 # =========================================================
-# TRIGGER REPOS (SEQUENTIAL, REAL)
+# TRIGGER REPOS (SEQUENTIAL)
 # =========================================================
-  repo-a:
-    name: Deploy repo-a
-    needs: approve
+  deploy-repo-a:
+    name: Trigger repo-a
+    needs: approve-release
     runs-on: ubuntu-latest
     steps:
       - run: |
-          PLAN=$(echo "${{ needs.plan.outputs.plan_b64 }}" | base64 -d)
+          PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-a") | .version')
           [ -z "$VERSION" ] && exit 0
-
           curl -L -X POST \
             -H "Authorization: token ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"region\":\"${{ inputs.region }}\"}}"
 
-  repo-b:
-    name: Deploy repo-b
-    needs: repo-a
+  deploy-repo-b:
+    name: Trigger repo-b
+    needs: deploy-repo-a
     runs-on: ubuntu-latest
     steps:
       - run: |
-          PLAN=$(echo "${{ needs.plan.outputs.plan_b64 }}" | base64 -d)
+          PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-b") | .version')
           [ -z "$VERSION" ] && exit 0
-
           curl -L -X POST \
             -H "Authorization: token ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"region\":\"${{ inputs.region }}\"}}"
 
-  repo-c:
-    name: Deploy repo-c
-    needs: repo-b
+  deploy-repo-c:
+    name: Trigger repo-c
+    needs: deploy-repo-b
     runs-on: ubuntu-latest
     steps:
       - run: |
-          PLAN=$(echo "${{ needs.plan.outputs.plan_b64 }}" | base64 -d)
+          PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-c") | .version')
           [ -z "$VERSION" ] && exit 0
-
           curl -L -X POST \
             -H "Authorization: token ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
