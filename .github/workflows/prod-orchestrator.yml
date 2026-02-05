@@ -85,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
-      - run: echo "✅ Production deployment approved"
+      - run: echo "✅ Production approved"
 
 # =========================================================
 # DEPLOY repo-a
@@ -107,7 +107,7 @@ jobs:
             exit 0
           fi
 
-          echo "Triggering repo-a with version $VERSION"
+          echo "Triggering repo-a : $VERSION"
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
@@ -119,7 +119,9 @@ jobs:
 # DEPLOY repo-b
 # =========================================================
   deploy-repo-b:
-    needs: deploy-repo-a
+    needs:
+      - orchestrate
+      - deploy-repo-a
     runs-on: ubuntu-latest
     steps:
       - shell: bash
@@ -133,7 +135,7 @@ jobs:
             exit 0
           fi
 
-          echo "Triggering repo-b with version $VERSION"
+          echo "Triggering repo-b : $VERSION"
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
@@ -145,7 +147,9 @@ jobs:
 # DEPLOY repo-c
 # =========================================================
   deploy-repo-c:
-    needs: deploy-repo-b
+    needs:
+      - orchestrate
+      - deploy-repo-b
     runs-on: ubuntu-latest
     steps:
       - shell: bash
@@ -159,7 +163,7 @@ jobs:
             exit 0
           fi
 
-          echo "Triggering repo-c with version $VERSION"
+          echo "Triggering repo-c : $VERSION"
 
           curl -f -X POST \
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
