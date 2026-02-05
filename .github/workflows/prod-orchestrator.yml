@@ -17,13 +17,8 @@ on:
         default: us-west-2
 
 jobs:
-# =========================================================
-# ORCHESTRATE (SUMMARY + PLAN)
-# =========================================================
   orchestrate:
     runs-on: ubuntu-latest
-    outputs:
-      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
 
     steps:
       - uses: actions/checkout@v4
@@ -47,127 +42,47 @@ jobs:
         run: |
           aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
-      - id: plan
+      - name: Build plan + summary
         shell: bash
         run: |
           REGION="${{ inputs.region }}"
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
 
-          echo "## 🚀 Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 🚀 Deployment Plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Action:** ${{ inputs.action }}" >> "$GITHUB_STEP_SUMMARY"
           echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
           echo "**Region:** $REGION" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "### 📌 What will happen" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Only repos with valid versions will be deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Each repo will pause for manual approval" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Deployment is handled by shared workflow" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
           echo "| Repo | Status | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|--------|---------|" >> "$GITHUB_STEP_SUMMARY"
 
-          PLAN_JSON='[]'
-
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
+
             if [[ "$VERSION" == "null" || "$VERSION" == "not_applicable" ]]; then
               echo "| $repo | Skipped | NA |" >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "| $repo | Deploy | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
-              PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
+              continue
             fi
+
+            echo "| $repo | Deploy | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
+
+            curl -f -X POST \
+              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml/dispatches \
+              -d "{
+                    \"ref\":\"main\",
+                    \"inputs\":{
+                      \"tag\":\"$VERSION\",
+                      \"environment\":\"${{ inputs.environment }}\"
+                    }
+                  }"
           done
-
-          echo "Final plan:"
-          echo "$PLAN_JSON" | jq .
-
-          PLAN_B64=$(echo "$PLAN_JSON" | base64 -w 0)
-          echo "plan_b64=$PLAN_B64" >> "$GITHUB_OUTPUT"
-
-# =========================================================
-# APPROVAL + DEPLOY repo-a
-# =========================================================
-  approval-repo-a:
-    needs: orchestrate
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - run: echo "Approved repo-a"
-
-  deploy-repo-a:
-    needs:
-      - orchestrate
-      - approval-repo-a
-    runs-on: ubuntu-latest
-    steps:
-      - shell: bash
-        run: |
-          set -euo pipefail
-          PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
-          VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-a") | .version')
-
-          if [[ -z "$VERSION" ]]; then
-            echo "❌ repo-a version missing"
-            exit 1
-          fi
-
-          curl -f -X POST \
-            -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\"}}"
-
-# =========================================================
-# APPROVAL + DEPLOY repo-b
-# =========================================================
-  approval-repo-b:
-    needs: deploy-repo-a
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - run: echo "Approved repo-b"
-
-  deploy-repo-b:
-    needs:
-      - orchestrate
-      - approval-repo-b
-    runs-on: ubuntu-latest
-    steps:
-      - shell: bash
-        run: |
-          set -euo pipefail
-          PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
-          VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-b") | .version')
-
-          [ -z "$VERSION" ] && exit 0
-
-          curl -f -X POST \
-            -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\"}}"
-
-# =========================================================
-# APPROVAL + DEPLOY repo-c
-# =========================================================
-  approval-repo-c:
-    needs: deploy-repo-b
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - run: echo "Approved repo-c"
-
-  deploy-repo-c:
-    needs:
-      - orchestrate
-      - approval-repo-c
-    runs-on: ubuntu-latest
-    steps:
-      - shell: bash
-        run: |
-          set -euo pipefail
-          PLAN_JSON=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 --decode)
-          VERSION=$(echo "$PLAN_JSON" | jq -r '.[] | select(.repo=="repo-c") | .version')
-
-          [ -z "$VERSION" ] && exit 0
-
-          curl -f -X POST \
-            -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\"}}"
