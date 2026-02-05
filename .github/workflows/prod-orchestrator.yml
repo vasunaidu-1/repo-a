@@ -6,6 +6,10 @@ run-name: >
 on:
   workflow_dispatch:
     inputs:
+      action:
+        type: choice
+        options: [deployment, rollback]
+        default: deployment
       environment:
         type: choice
         options: [prod-west, prod-east]
@@ -34,7 +38,11 @@ jobs:
 
       - name: Download manifest
         run: |
-          aws s3 cp s3://mos-deploy-manifests/deployment-manifest.yaml manifest.yaml
+          if [ "${{ inputs.action }}" = "rollback" ]; then
+            aws s3 cp s3://mos-deploy-manifests/rollback-manifest.yaml manifest.yaml
+          else
+            aws s3 cp s3://mos-deploy-manifests/deployment-manifest.yaml manifest.yaml
+          fi
 
       - id: plan
         shell: bash
@@ -102,7 +110,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\"}}"
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"action\":\"${{ inputs.action }}\"}}"
 
   deploy-repo-b:
     name: Trigger repo-b
@@ -118,7 +126,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\"}}"
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"action\":\"${{ inputs.action }}\"}}"
 
   deploy-repo-c:
     name: Trigger repo-c
@@ -134,4 +142,4 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\"}}"
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"action\":\"${{ inputs.action }}\"}}"
