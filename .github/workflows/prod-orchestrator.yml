@@ -11,29 +11,10 @@ on:
         options: [deployment, rollback]
         default: deployment
 
-      target_repos:
-        type: choice
-        description: "Select target repositories"
-        options:
-          - all
-          - repo-a
-          - repo-b
-          - repo-c
-          - repo-a,repo-b
-          - repo-a,repo-c
-          - repo-b,repo-c
-          - repo-a,repo-b,repo-c
-        default: all
-
       environment:
         type: choice
         options: [prod-west, prod-east]
         default: prod-west
-
-      region:
-        type: choice
-        options: [us-west-2, us-east-1]
-        default: us-west-2
 
 jobs:
 # =========================================================
@@ -61,7 +42,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ inputs.region }}
+          aws-region: us-west-2
 
       - name: Download manifest
         run: |
@@ -71,32 +52,30 @@ jobs:
         shell: bash
         run: |
           set -e
-          REGION="${{ inputs.region }}"
-          TARGET="${{ inputs.target_repos }}"
-          ACTION="${{ inputs.action }}"
-          DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
 
+          ACTION="${{ inputs.action }}"
+          ENV="${{ inputs.environment }}"
+
+          if [[ "$ENV" == "prod-west" ]]; then
+            REGION="us-west-2"
+          else
+            REGION="us-east-1"
+          fi
+
+          DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
           PLAN_JSON='[]'
 
           echo "## 🚀 ${ACTION^} Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "This workflow orchestrates a **${ACTION}** across selected repositories." >> "$GITHUB_STEP_SUMMARY"
-          echo "Only repositories included in the target list are executed. Others are safely skipped." >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Target repos:** $TARGET" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Environment:** $ENV" >> "$GITHUB_STEP_SUMMARY"
           echo "**Region:** $REGION" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Action | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|--------|---------|" >> "$GITHUB_STEP_SUMMARY"
 
           for repo in repo-a repo-b repo-c; do
-            if [[ "$TARGET" != "all" && ! ",$TARGET," =~ ",$repo," ]]; then
-              echo "| $repo | Skipped | NA |" >> "$GITHUB_STEP_SUMMARY"
-              continue
-            fi
-
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
+
             if [[ "$VERSION" == "null" || -z "$VERSION" ]]; then
               echo "| $repo | Skipped | NA |" >> "$GITHUB_STEP_SUMMARY"
               continue
@@ -111,17 +90,9 @@ jobs:
 # =========================================================
 # repo-a
 # =========================================================
-  approval-repo-a:
-    name: Approval • repo-a
-    needs: orchestrate
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - run: echo "Approved repo-a"
-
   deploy-repo-a:
-    name: Deploy/Rollback • repo-a
-    needs: [orchestrate, approval-repo-a]
+    name: Trigger • repo-a
+    needs: orchestrate
     runs-on: ubuntu-latest
     steps:
       - run: |
@@ -137,22 +108,14 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\",\"action\":\"${{ inputs.action }}\"}}"
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"action\":\"${{ inputs.action }}\"}}"
 
 # =========================================================
 # repo-b
 # =========================================================
-  approval-repo-b:
-    name: Approval • repo-b
-    needs: deploy-repo-a
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - run: echo "Approved repo-b"
-
   deploy-repo-b:
-    name: Deploy/Rollback • repo-b
-    needs: [orchestrate, approval-repo-b]
+    name: Trigger • repo-b
+    needs: deploy-repo-a
     runs-on: ubuntu-latest
     steps:
       - run: |
@@ -168,22 +131,14 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\",\"action\":\"${{ inputs.action }}\"}}"
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"action\":\"${{ inputs.action }}\"}}"
 
 # =========================================================
 # repo-c
 # =========================================================
-  approval-repo-c:
-    name: Approval • repo-c
-    needs: deploy-repo-b
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - run: echo "Approved repo-c"
-
   deploy-repo-c:
-    name: Deploy/Rollback • repo-c
-    needs: [orchestrate, approval-repo-c]
+    name: Trigger • repo-c
+    needs: deploy-repo-b
     runs-on: ubuntu-latest
     steps:
       - run: |
@@ -199,4 +154,4 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ inputs.region }}\",\"action\":\"${{ inputs.action }}\"}}"
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"action\":\"${{ inputs.action }}\"}}"
