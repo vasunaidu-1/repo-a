@@ -1,6 +1,6 @@
-# ===============================
+# =========================================================
 # repo-a : .github/workflows/prod-orchestrator.yml
-# ===============================
+# =========================================================
 name: Prod Orchestrator
 
 run-name: >
@@ -13,14 +13,14 @@ on:
         type: choice
         options: [deployment, rollback]
         default: deployment
-      environment:
+      region:
         type: choice
-        options: [prod-west, prod-east]
-        default: prod-west
+        options: [us-west-2, us-east-1]
+        default: us-west-2
 
 jobs:
 # =========================================================
-# PLAN + SUMMARY
+# PLAN + SUMMARY (BEFORE APPROVAL)
 # =========================================================
   orchestrate:
     name: Plan & Summary
@@ -44,7 +44,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-west-2
+          aws-region: ${{ inputs.region }}
 
       - name: Download manifest
         run: |
@@ -58,30 +58,26 @@ jobs:
         shell: bash
         run: |
           set -e
-          ENV="${{ inputs.environment }}"
-          if [[ "$ENV" == "prod-west" ]]; then
-            REGION="us-west-2"
-          else
-            REGION="us-east-1"
-          fi
-
+          REGION="${{ inputs.region }}"
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
           PLAN_JSON='[]'
 
-          echo "## 🚀 Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 🚀 Release Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Environment:** $ENV" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Action:** ${{ inputs.action }}" >> "$GITHUB_STEP_SUMMARY"
           echo "**Region:** $REGION" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
 
           for repo in repo-a repo-b repo-c; do
-            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
-            if [[ "$VERSION" == "null" || -z "$VERSION" ]]; then
+            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // \"not_applicable\"")
+
+            if [[ "$VERSION" == "not_applicable" || "$VERSION" == "null" || -z "$VERSION" ]]; then
               echo "| $repo | Skipped |" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
+
             echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
             PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
           done
@@ -89,7 +85,7 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w 0)" >> "$GITHUB_OUTPUT"
 
 # =========================================================
-# APPROVAL AFTER SUMMARY (ONLY ONCE)
+# APPROVAL AFTER SUMMARY
 # =========================================================
   approve-plan:
     name: Approve Release Plan
@@ -100,7 +96,7 @@ jobs:
       - run: echo "Plan approved"
 
 # =========================================================
-# TRIGGER REPOS (SEQUENTIAL, AFTER APPROVAL)
+# TRIGGER REPOS (SEQUENTIAL)
 # =========================================================
   trigger-repo-a:
     name: Trigger repo-a
@@ -115,7 +111,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"action\":\"${{ inputs.action }}\"}}"
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.region }}\"}}"
 
   trigger-repo-b:
     name: Trigger repo-b
@@ -130,7 +126,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"action\":\"${{ inputs.action }}\"}}"
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.region }}\"}}"
 
   trigger-repo-c:
     name: Trigger repo-c
@@ -145,4 +141,4 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"action\":\"${{ inputs.action }}\"}}"
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.region }}\"}}"
