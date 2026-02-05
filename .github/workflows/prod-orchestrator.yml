@@ -65,16 +65,18 @@ jobs:
           REGION="${{ steps.set-region.outputs.region }}"
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
 
-          echo "## 🚀 Release Orchestration Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 🚀 Release Orchestration Overview" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### What this run represents" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Operation: **${{ inputs.action }}**" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Environment: **${{ inputs.environment }}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "This pipeline first prepares and validates the release plan based on the deployment manifest." >> "$GITHUB_STEP_SUMMARY"
+          echo "It provides full visibility into what services will be deployed, which versions will be used, and the target environment." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- The orchestration validates the release manifest and prepares a deployment plan." >> "$GITHUB_STEP_SUMMARY"
-          echo "- No production changes occur during this step." >> "$GITHUB_STEP_SUMMARY"
-          echo "- After manual approval, repositories are triggered sequentially." >> "$GITHUB_STEP_SUMMARY"
-          echo "- Each repository enforces its own approval and deployment controls." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "After the plan is reviewed and manually approved, the orchestrator triggers deployments for each service sequentially." >> "$GITHUB_STEP_SUMMARY"
+          echo "Each service deployment is further governed by repository-level approvals and controls, ensuring safe, auditable, and controlled production releases." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "**Operation:** ${{ inputs.action }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
           echo "| Service | Version |" >> "$GITHUB_STEP_SUMMARY"
@@ -91,7 +93,7 @@ jobs:
           done
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "> ✅ This run is clearly tagged as **${{ inputs.action }}** for audit and traceability." >> "$GITHUB_STEP_SUMMARY"
+          echo "> ✅ No production deployments will begin until the release plan is explicitly approved." >> "$GITHUB_STEP_SUMMARY"
 
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w 0)" >> "$GITHUB_OUTPUT"
 
