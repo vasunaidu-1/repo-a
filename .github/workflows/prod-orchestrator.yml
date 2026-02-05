@@ -23,7 +23,7 @@ jobs:
     name: Plan & Summary
     runs-on: ubuntu-latest
     outputs:
-      plan_b64: ${{ steps.build.outputs.plan_b64 }}
+      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
 
     steps:
       - name: Install tools
@@ -47,13 +47,13 @@ jobs:
             s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml \
             manifest.yaml
 
-      - id: build
+      - id: plan
         run: |
           REGION="${{ inputs.region }}"
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
           PLAN='[]'
 
-          echo "## 🚀 Release Plan" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "**Action:** ${{ inputs.action }}" >> $GITHUB_STEP_SUMMARY
           echo "**Region:** $REGION" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -81,10 +81,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: orchestrator-approval
     steps:
-      - run: echo "Release plan approved"
+      - run: echo "Plan approved"
 
 # =====================================================
-# 3. TRIGGER REPO-A (APPROVAL INSIDE REPO)
+# 3. TRIGGER REPO-A
 # =====================================================
   deploy-repo-a:
     needs: approve-plan
@@ -95,14 +95,14 @@ jobs:
           VER=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-a") | .version')
           [ -z "$VER" ] && exit 0
 
-          curl -X POST \
+          curl -s -X POST \
             -H "Authorization: token ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VER\",\"environment\":\"prod\",\"region\":\"${{ inputs.region }}\"}}"
 
 # =====================================================
-# 4. TRIGGER REPO-B (APPROVAL INSIDE REPO)
+# 4. TRIGGER REPO-B
 # =====================================================
   deploy-repo-b:
     needs: deploy-repo-a
@@ -113,14 +113,14 @@ jobs:
           VER=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-b") | .version')
           [ -z "$VER" ] && exit 0
 
-          curl -X POST \
+          curl -s -X POST \
             -H "Authorization: token ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VER\",\"environment\":\"prod\",\"region\":\"${{ inputs.region }}\"}}"
 
 # =====================================================
-# 5. TRIGGER REPO-C (APPROVAL INSIDE REPO)
+# 5. TRIGGER REPO-C
 # =====================================================
   deploy-repo-c:
     needs: deploy-repo-b
@@ -131,7 +131,7 @@ jobs:
           VER=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-c") | .version')
           [ -z "$VER" ] && exit 0
 
-          curl -X POST \
+          curl -s -X POST \
             -H "Authorization: token ${{ secrets.ORG1_PAT }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
