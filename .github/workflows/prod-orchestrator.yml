@@ -1,6 +1,7 @@
 name: Prod Orchestrator
 
-run-name: prod-release
+run-name: >
+  ${{ inputs.action == 'rollback' && 'prod-rollback' || 'prod-deploy' }}
 
 on:
   workflow_dispatch:
