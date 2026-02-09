@@ -16,7 +16,7 @@ on:
           - prod-west
           - prod-east
           - prod-west followed by prod-east
-        default: prod-west followed by prod-east
+        default: prod-west
 
 # =========================================================
 # PROD-WEST : BUILD & PLAN
@@ -24,7 +24,7 @@ on:
 jobs:
   plan-west:
     name: Build & Plan (prod-west)
-    if: contains(inputs.environment, 'prod-west')
+    if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west followed by prod-east'
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
@@ -85,19 +85,19 @@ jobs:
   approve-west:
     name: Approve prod-west
     needs: plan-west
-    if: contains(inputs.environment, 'prod-west')
+    if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west followed by prod-east'
     runs-on: ubuntu-latest
     environment: prod-west
     steps:
       - run: echo "prod-west approved"
 
 # =========================================================
-# PROD-WEST : TRIGGER (NO MANIFEST READ HERE)
+# PROD-WEST : TRIGGER
 # =========================================================
   trigger-west:
     name: Trigger prod-west repos
     needs: approve-west
-    if: contains(inputs.environment, 'prod-west')
+    if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west followed by prod-east'
     runs-on: ubuntu-latest
 
     steps:
@@ -141,12 +141,12 @@ jobs:
           done
 
 # =========================================================
-# PROD-EAST : BUILD & PLAN (AFTER WEST)
+# PROD-EAST : BUILD & PLAN (ONLY WHEN SELECTED)
 # =========================================================
   plan-east:
     name: Build & Plan (prod-east)
     needs: trigger-west
-    if: inputs.environment != 'prod-west'
+    if: inputs.environment == 'prod-east' || inputs.environment == 'prod-west followed by prod-east'
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
@@ -207,7 +207,7 @@ jobs:
   approve-east:
     name: Approve prod-east
     needs: plan-east
-    if: inputs.environment != 'prod-west'
+    if: inputs.environment == 'prod-east' || inputs.environment == 'prod-west followed by prod-east'
     runs-on: ubuntu-latest
     environment: prod-east
     steps:
@@ -219,7 +219,7 @@ jobs:
   trigger-east:
     name: Trigger prod-east repos
     needs: approve-east
-    if: inputs.environment != 'prod-west'
+    if: inputs.environment == 'prod-east' || inputs.environment == 'prod-west followed by prod-east'
     runs-on: ubuntu-latest
 
     steps:
