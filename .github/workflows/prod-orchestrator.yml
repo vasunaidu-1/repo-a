@@ -47,11 +47,11 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-west-2
 
-      - name: Download manifest from S3
+      - name: Download manifest
         run: |
           aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
-      - name: Build release plan summary
+      - name: Build plan summary (west)
         id: plan
         shell: bash
         run: |
@@ -88,7 +88,7 @@ jobs:
       - run: echo "prod-west approved"
 
 # =========================================================
-# PROD-WEST : TRIGGER (REAL + VERIFIED)
+# PROD-WEST : TRIGGER
 # =========================================================
   trigger-west:
     name: Trigger prod-west repos
@@ -97,23 +97,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Trigger repos & build final summary
+      - name: Trigger repos and summary (west)
         shell: bash
         run: |
-          PLAN=$(echo "${{ needs.plan-west.outputs.plan_b64 }}" | base64 -d)
+          PLAN=$(echo '${{ needs.plan-west.outputs.plan_b64 }}' | base64 -d)
 
+          ALL_REPOS=(repo-a repo-b repo-c)
           TRIGGERED=()
-          SKIPPED=()
+          SKIPPED=("${ALL_REPOS[@]}")
 
-          for repo in repo-a repo-b repo-c; do
-            VERSION=$(echo "$PLAN" | jq -r ".[] | select(.repo==\"$repo\") | .version")
+          echo "## 🚀 prod-west Trigger Results" >> "$GITHUB_STEP_SUMMARY"
 
-            if [[ -z "$VERSION" || "$VERSION" == "null" ]]; then
-              SKIPPED+=("$repo")
-              continue
-            fi
-
-            echo "Triggering $repo with version $VERSION"
+          for row in $(echo "$PLAN" | jq -c '.[]'); do
+            repo=$(echo "$row" | jq -r '.repo')
+            version=$(echo "$row" | jq -r '.version')
 
             curl -f -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
@@ -122,42 +119,151 @@ jobs:
               -d "{
                 \"ref\":\"main\",
                 \"inputs\":{
-                  \"tag\":\"$VERSION\",
+                  \"tag\":\"$version\",
                   \"environment\":\"prod-west\",
                   \"region\":\"us-west-2\"
                 }
               }"
 
             TRIGGERED+=("$repo")
+            SKIPPED=(${SKIPPED[@]/$repo})
           done
 
-          echo "## 🚀 prod-west Trigger Results" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-
           echo "### ✅ Triggered Repositories" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Approval Link |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|---------------|" >> "$GITHUB_STEP_SUMMARY"
-
           for repo in "${TRIGGERED[@]}"; do
             echo "| $repo | https://github.com/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
           done
 
-          if [[ ${#SKIPPED[@]} -gt 0 ]]; then
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "### ⏭ Skipped Repositories (NA in manifest)" >> "$GITHUB_STEP_SUMMARY"
-            for repo in "${SKIPPED[@]}"; do
-              echo "- $repo" >> "$GITHUB_STEP_SUMMARY"
-            done
-          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### ⏭ Skipped Repositories (NA in manifest)" >> "$GITHUB_STEP_SUMMARY"
+          for repo in "${SKIPPED[@]}"; do
+            echo "- $repo" >> "$GITHUB_STEP_SUMMARY"
+          done
 
 # =========================================================
-# PROD-EAST : APPROVAL (ONLY AFTER WEST IF SELECTED)
+# PROD-EAST : PLAN
+# =========================================================
+  plan-east:
+    name: Build & Plan (prod-east)
+    needs: trigger-west
+    if: inputs.environment != 'prod-west'
+    runs-on: ubuntu-latest
+    outputs:
+      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x yq_linux_amd64
+          sudo mv yq_linux_amd64 /usr/local/bin/yq
+
+      - name: Configure AWS (east)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Download manifest
+        run: |
+          aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
+
+      - name: Build plan summary (east)
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATA=$(yq -o=json '.["us-east-1"]' manifest.yaml)
+          PLAN_JSON='[]'
+
+          echo "## 📦 prod-east Release Plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
+
+          for repo in repo-a repo-b repo-c; do
+            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
+            if [[ "$VERSION" != "null" && "$VERSION" != "NA" ]]; then
+              echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
+              PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
+            else
+              echo "| $repo | ⏭ skipped (NA) |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+          echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+# =========================================================
+# PROD-EAST : APPROVAL
 # =========================================================
   approve-east:
     name: Approve prod-east
-    needs: trigger-west
-    if: inputs.environment == 'prod-west followed by prod-east'
+    needs: plan-east
+    if: inputs.environment != 'prod-west'
     runs-on: ubuntu-latest
     environment: prod-east
     steps:
       - run: echo "prod-east approved"
+
+# =========================================================
+# PROD-EAST : TRIGGER
+# =========================================================
+  trigger-east:
+    name: Trigger prod-east repos
+    needs: approve-east
+    if: inputs.environment != 'prod-west'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger repos and summary (east)
+        shell: bash
+        run: |
+          PLAN=$(echo '${{ needs.plan-east.outputs.plan_b64 }}' | base64 -d)
+
+          ALL_REPOS=(repo-a repo-b repo-c)
+          TRIGGERED=()
+          SKIPPED=("${ALL_REPOS[@]}")
+
+          echo "## 🚀 prod-east Trigger Results" >> "$GITHUB_STEP_SUMMARY"
+
+          for row in $(echo "$PLAN" | jq -c '.[]'); do
+            repo=$(echo "$row" | jq -r '.repo')
+            version=$(echo "$row" | jq -r '.version')
+
+            curl -f -X POST \
+              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml/dispatches \
+              -d "{
+                \"ref\":\"main\",
+                \"inputs\":{
+                  \"tag\":\"$version\",
+                  \"environment\":\"prod-east\",
+                  \"region\":\"us-east-1\"
+                }
+              }"
+
+            TRIGGERED+=("$repo")
+            SKIPPED=(${SKIPPED[@]/$repo})
+          done
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### ✅ Triggered Repositories" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Approval Link |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|---------------|" >> "$GITHUB_STEP_SUMMARY"
+          for repo in "${TRIGGERED[@]}"; do
+            echo "| $repo | https://github.com/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### ⏭ Skipped Repositories (NA in manifest)" >> "$GITHUB_STEP_SUMMARY"
+          for repo in "${SKIPPED[@]}"; do
+            echo "- $repo" >> "$GITHUB_STEP_SUMMARY"
+          done
