@@ -17,7 +17,7 @@ on:
         default: prod-west
 
 # =========================================================
-# ===================== PROD-WEST =========================
+# ======================= PROD-WEST =======================
 # =========================================================
 jobs:
   west-plan:
@@ -121,12 +121,11 @@ jobs:
           done
 
 # =========================================================
-# ===================== PROD-EAST =========================
+# ======================= PROD-EAST =======================
 # =========================================================
   east-plan:
     name: Build Release Plan (prod-east)
-    if: inputs.environment == 'prod-east' || inputs.environment == 'prod-west followed by prod-east'
-    needs: west-trigger
+    if: inputs.environment == 'prod-east'
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
@@ -180,7 +179,7 @@ jobs:
   east-approve:
     name: Approve Release Plan (prod-east)
     needs: east-plan
-    if: inputs.environment == 'prod-east' || inputs.environment == 'prod-west followed by prod-east'
+    if: inputs.environment == 'prod-east'
     runs-on: ubuntu-latest
     environment: prod-east
     steps:
@@ -189,7 +188,7 @@ jobs:
   east-trigger:
     name: Trigger prod-east repos
     needs: east-approve
-    if: inputs.environment == 'prod-east' || inputs.environment == 'prod-west followed by prod-east'
+    if: inputs.environment == 'prod-east'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger repos & links (prod-east)
