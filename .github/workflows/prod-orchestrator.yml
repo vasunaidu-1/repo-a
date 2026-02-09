@@ -13,13 +13,13 @@ on:
       environment:
         type: choice
         options:
-          - prod-west followed by prod-east
           - prod-west
           - prod-east
+          - prod-west followed by prod-east
         default: prod-west followed by prod-east
 
 # =========================================================
-# PROD-WEST : PLAN
+# PROD-WEST : BUILD & PLAN
 # =========================================================
 jobs:
   plan-west:
@@ -51,7 +51,7 @@ jobs:
         run: |
           aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
-      - name: Build plan and summary (west)
+      - name: Build release plan summary
         id: plan
         shell: bash
         run: |
@@ -59,15 +59,17 @@ jobs:
           DATA=$(yq -o=json '.["us-west-2"]' manifest.yaml)
           PLAN_JSON='[]'
 
-          echo "## 📦 prod-west Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Service | Version |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|--------|---------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 📦 prod-west Release Plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
 
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
             if [[ "$VERSION" != "null" && "$VERSION" != "NA" ]]; then
               echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
               PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
+            else
+              echo "| $repo | ⏭ skipped (NA) |" >> "$GITHUB_STEP_SUMMARY"
             fi
           done
 
@@ -86,73 +88,76 @@ jobs:
       - run: echo "prod-west approved"
 
 # =========================================================
-# PROD-WEST : TRIGGER
+# PROD-WEST : TRIGGER (REAL + VERIFIED)
 # =========================================================
   trigger-west:
     name: Trigger prod-west repos
     needs: approve-west
     if: contains(inputs.environment, 'prod-west')
     runs-on: ubuntu-latest
+
     steps:
-      - name: Trigger repositories
+      - name: Trigger repos & build final summary
+        shell: bash
         run: |
           PLAN=$(echo "${{ needs.plan-west.outputs.plan_b64 }}" | base64 -d)
 
+          TRIGGERED=()
+          SKIPPED=()
+
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$PLAN" | jq -r ".[] | select(.repo==\"$repo\") | .version")
-            [[ -z "$VERSION" ]] && continue
+
+            if [[ -z "$VERSION" || "$VERSION" == "null" ]]; then
+              SKIPPED+=("$repo")
+              continue
+            fi
+
+            echo "Triggering $repo with version $VERSION"
 
             curl -f -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
               -H "Accept: application/vnd.github+json" \
               https://api.github.com/repos/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml/dispatches \
-              -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"prod-west\",\"region\":\"us-west-2\"}}"
+              -d "{
+                \"ref\":\"main\",
+                \"inputs\":{
+                  \"tag\":\"$VERSION\",
+                  \"environment\":\"prod-west\",
+                  \"region\":\"us-west-2\"
+                }
+              }"
+
+            TRIGGERED+=("$repo")
           done
 
-      - name: Post-trigger summary (west)
-        run: |
-          echo "## 🚀 prod-west Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
-          echo "Click the links below to approve deployments:" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 🚀 prod-west Trigger Results" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Repository | Approval Link |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|------------|---------------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| repo-a | https://github.com/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| repo-b | https://github.com/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| repo-c | https://github.com/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "### ✅ Triggered Repositories" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Approval Link |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|---------------|" >> "$GITHUB_STEP_SUMMARY"
+
+          for repo in "${TRIGGERED[@]}"; do
+            echo "| $repo | https://github.com/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          if [[ ${#SKIPPED[@]} -gt 0 ]]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### ⏭ Skipped Repositories (NA in manifest)" >> "$GITHUB_STEP_SUMMARY"
+            for repo in "${SKIPPED[@]}"; do
+              echo "- $repo" >> "$GITHUB_STEP_SUMMARY"
+            done
+          fi
 
 # =========================================================
-# PROD-EAST : PLAN (ONLY AFTER WEST WHEN SELECTED)
-# =========================================================
-  plan-east:
-    name: Build & Plan (prod-east)
-    needs: trigger-west
-    if: inputs.environment != 'prod-west'
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          echo "## 📦 prod-east Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
-          echo "Manifest-driven plan will be applied for prod-east" >> "$GITHUB_STEP_SUMMARY"
-
-# =========================================================
-# PROD-EAST : APPROVAL
+# PROD-EAST : APPROVAL (ONLY AFTER WEST IF SELECTED)
 # =========================================================
   approve-east:
     name: Approve prod-east
-    needs: plan-east
-    if: inputs.environment != 'prod-west'
+    needs: trigger-west
+    if: inputs.environment == 'prod-west followed by prod-east'
     runs-on: ubuntu-latest
     environment: prod-east
     steps:
       - run: echo "prod-east approved"
-
-# =========================================================
-# PROD-EAST : TRIGGER
-# =========================================================
-  trigger-east:
-    name: Trigger prod-east repos
-    needs: approve-east
-    if: inputs.environment != 'prod-west'
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          echo "prod-east repos triggered (same logic as west)"
