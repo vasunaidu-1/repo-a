@@ -17,26 +17,17 @@ on:
         default: prod-west
 
 # =========================================================
-# BUILD & PLAN
+# ===================== PROD-WEST =========================
 # =========================================================
 jobs:
-  plan:
-    name: Build Release Plan
+  west-plan:
+    name: Build Release Plan (prod-west)
+    if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west followed by prod-east'
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
-      region: ${{ steps.region.outputs.region }}
 
     steps:
-      - name: Set region
-        id: region
-        run: |
-          if [[ "${{ inputs.environment }}" == "prod-east" ]]; then
-            echo "region=us-east-1" >> $GITHUB_OUTPUT
-          else
-            echo "region=us-west-2" >> $GITHUB_OUTPUT
-          fi
-
       - name: Install tools
         run: |
           sudo apt-get update
@@ -45,39 +36,36 @@ jobs:
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
 
-      - name: Configure AWS
+      - name: Configure AWS (west)
         uses: aws-actions/configure-aws-credentials@v4
         with:
+          aws-region: us-west-2
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ steps.region.outputs.region }}
 
       - name: Download manifest
         run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
-      - name: Build plan & summary
+      - name: Build plan & summary (prod-west)
         id: plan
         shell: bash
         run: |
           set -euo pipefail
-
-          REGION="${{ steps.region.outputs.region }}"
-          DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
-
+          DATA=$(yq -o=json '.["us-west-2"]' manifest.yaml)
           PLAN='[]'
 
           echo "## Release Orchestration Overview" >> $GITHUB_STEP_SUMMARY
           echo "**Operation:** ${{ inputs.action }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** prod-west" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Service | Version |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|---------|" >> $GITHUB_STEP_SUMMARY
 
           for repo in repo-a repo-b repo-c; do
-            version=$(echo "$DATA" | jq -r ".\"$repo\".version")
-            if [[ "$version" != "NA" && "$version" != "null" ]]; then
-              echo "| $repo | v$version |" >> $GITHUB_STEP_SUMMARY
-              PLAN=$(echo "$PLAN" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$version\"}]")
+            v=$(echo "$DATA" | jq -r ".\"$repo\".version")
+            if [[ "$v" != "NA" && "$v" != "null" ]]; then
+              echo "| $repo | v$v |" >> $GITHUB_STEP_SUMMARY
+              PLAN=$(echo "$PLAN" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$v\"}]")
             else
               echo "| $repo | NA (skipped) |" >> $GITHUB_STEP_SUMMARY
             fi
@@ -85,38 +73,34 @@ jobs:
 
           echo "plan_b64=$(echo "$PLAN" | base64 -w0)" >> $GITHUB_OUTPUT
 
-# =========================================================
-# APPROVAL
-# =========================================================
-  approve:
-    name: Approve Release Plan
-    needs: plan
+  west-approve:
+    name: Approve Release Plan (prod-west)
+    needs: west-plan
+    if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west followed by prod-east'
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: prod-west
     steps:
-      - run: echo "Approved"
+      - run: echo approved
 
-# =========================================================
-# TRIGGER + LINKS SUMMARY
-# =========================================================
-  trigger:
-    name: Trigger Repositories
-    needs: approve
+  west-trigger:
+    name: Trigger prod-west repos
+    needs: west-approve
+    if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west followed by prod-east'
     runs-on: ubuntu-latest
-
     steps:
-      - name: Trigger repos and show links
+      - name: Trigger repos & links (prod-west)
         shell: bash
         run: |
-          PLAN=$(echo '${{ needs.plan.outputs.plan_b64 }}' | base64 -d)
+          set -euo pipefail
+          PLAN=$(echo '${{ needs.west-plan.outputs.plan_b64 }}' | base64 -d)
 
-          echo "## 🚀 ${{ inputs.environment }} Repositories Triggered" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 prod-west Repositories Triggered" >> $GITHUB_STEP_SUMMARY
           echo "Click the links below to approve deployments:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Repository | Approval Link |" >> $GITHUB_STEP_SUMMARY
           echo "|------------|---------------|" >> $GITHUB_STEP_SUMMARY
 
-          for row in $(echo "$PLAN" | jq -c '.[]'); do
+          echo "$PLAN" | jq -c '.[]' | while read -r row; do
             repo=$(echo "$row" | jq -r '.repo')
             version=$(echo "$row" | jq -r '.version')
 
@@ -128,8 +112,112 @@ jobs:
                 \"ref\":\"main\",
                 \"inputs\":{
                   \"tag\":\"$version\",
-                  \"environment\":\"${{ inputs.environment }}\",
-                  \"region\":\"${{ needs.plan.outputs.region }}\"
+                  \"environment\":\"prod-west\",
+                  \"region\":\"us-west-2\"
+                }
+              }"
+
+            echo "| $repo | https://github.com/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml |" >> $GITHUB_STEP_SUMMARY
+          done
+
+# =========================================================
+# ===================== PROD-EAST =========================
+# =========================================================
+  east-plan:
+    name: Build Release Plan (prod-east)
+    if: inputs.environment == 'prod-east' || inputs.environment == 'prod-west followed by prod-east'
+    needs: west-trigger
+    runs-on: ubuntu-latest
+    outputs:
+      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
+
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x yq_linux_amd64
+          sudo mv yq_linux_amd64 /usr/local/bin/yq
+
+      - name: Configure AWS (east)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-1
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Download manifest
+        run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
+
+      - name: Build plan & summary (prod-east)
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATA=$(yq -o=json '.["us-east-1"]' manifest.yaml)
+          PLAN='[]'
+
+          echo "## Release Orchestration Overview" >> $GITHUB_STEP_SUMMARY
+          echo "**Operation:** ${{ inputs.action }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** prod-east" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|---------|" >> $GITHUB_STEP_SUMMARY
+
+          for repo in repo-a repo-b repo-c; do
+            v=$(echo "$DATA" | jq -r ".\"$repo\".version")
+            if [[ "$v" != "NA" && "$v" != "null" ]]; then
+              echo "| $repo | v$v |" >> $GITHUB_STEP_SUMMARY
+              PLAN=$(echo "$PLAN" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$v\"}]")
+            else
+              echo "| $repo | NA (skipped) |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          echo "plan_b64=$(echo "$PLAN" | base64 -w0)" >> $GITHUB_OUTPUT
+
+  east-approve:
+    name: Approve Release Plan (prod-east)
+    needs: east-plan
+    if: inputs.environment == 'prod-east' || inputs.environment == 'prod-west followed by prod-east'
+    runs-on: ubuntu-latest
+    environment: prod-east
+    steps:
+      - run: echo approved
+
+  east-trigger:
+    name: Trigger prod-east repos
+    needs: east-approve
+    if: inputs.environment == 'prod-east' || inputs.environment == 'prod-west followed by prod-east'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger repos & links (prod-east)
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=$(echo '${{ needs.east-plan.outputs.plan_b64 }}' | base64 -d)
+
+          echo "## 🚀 prod-east Repositories Triggered" >> $GITHUB_STEP_SUMMARY
+          echo "Click the links below to approve deployments:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Repository | Approval Link |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|---------------|" >> $GITHUB_STEP_SUMMARY
+
+          echo "$PLAN" | jq -c '.[]' | while read -r row; do
+            repo=$(echo "$row" | jq -r '.repo')
+            version=$(echo "$row" | jq -r '.version')
+
+            curl -f -X POST \
+              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml/dispatches \
+              -d "{
+                \"ref\":\"main\",
+                \"inputs\":{
+                  \"tag\":\"$version\",
+                  \"environment\":\"prod-east\",
+                  \"region\":\"us-east-1\"
                 }
               }"
 
