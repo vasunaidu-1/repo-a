@@ -6,15 +6,18 @@ on:
     inputs:
       action:
         type: choice
-        options: [deployment, rollback, prod-west-followed-by-prod-east]
+        options: [deployment, rollback]
         default: deployment
       environment:
         type: choice
-        options: [prod-west, prod-east]
+        options:
+          - prod-west
+          - prod-east
+          - prod-west-followed-by-prod-east
         default: prod-west
 
 # =========================================================
-# BUILD PLAN
+# BUILD PLAN (WEST / EAST / WEST-PHASE)
 # =========================================================
 jobs:
   orchestrate:
@@ -33,13 +36,10 @@ jobs:
       - name: Set region
         id: set-region
         run: |
-          if [[ "${{ inputs.environment }}" == "prod-west" ]]; then
+          if [[ "${{ inputs.environment }}" == "prod-west" || "${{ inputs.environment }}" == "prod-west-followed-by-prod-east" ]]; then
             echo "region=us-west-2" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ inputs.environment }}" == "prod-east" ]]; then
+          else
             echo "region=us-east-1" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ inputs.action }}" == "prod-west-followed-by-prod-east" ]]; then
-            # First phase is prod-west
-            echo "region=us-west-2" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install tools
@@ -63,27 +63,25 @@ jobs:
 
       - name: Build plan and summary
         id: plan
-        shell: bash
         run: |
           set -euo pipefail
           REGION="${{ steps.set-region.outputs.region }}"
           DATA=$(yq -o=json ".\"$REGION\"" manifest.yaml)
+
           HAS_A=false
           HAS_B=false
           HAS_C=false
           PLAN_JSON='[]'
+
           echo "## prod-${{ inputs.environment }} Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Operation:** ${{ inputs.action }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Service | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|--------|---------|" >> "$GITHUB_STEP_SUMMARY"
+
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
             if [[ "$VERSION" == "NA" ]]; then
               echo "| $repo | Skipped (version = NA) |" >> "$GITHUB_STEP_SUMMARY"
-            elif [[ -n "$VERSION" && "$VERSION" != "null" && "$VERSION" != "not_applicable" ]]; then
+            elif [[ -n "$VERSION" ]]; then
               echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
               PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
               [[ "$repo" == "repo-a" ]] && HAS_A=true
@@ -91,33 +89,32 @@ jobs:
               [[ "$repo" == "repo-c" ]] && HAS_C=true
             fi
           done
+
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
           echo "has_repo_a=$HAS_A" >> "$GITHUB_OUTPUT"
           echo "has_repo_b=$HAS_B" >> "$GITHUB_OUTPUT"
           echo "has_repo_c=$HAS_C" >> "$GITHUB_OUTPUT"
 
 # =========================================================
-# APPROVAL
+# APPROVAL (WEST / EAST)
 # =========================================================
   approval:
     name: Approve Release Plan
     needs: orchestrate
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: ${{ inputs.environment == 'prod-west-followed-by-prod-east' && 'prod-west' || inputs.environment }}
     steps:
       - run: echo "Approved"
 
 # =========================================================
-# TRIGGERS
+# TRIGGERS (WEST / EAST)
 # =========================================================
   trigger-repo-a:
-    name: Trigger repo-a
     if: needs.orchestrate.outputs.has_repo_a == 'true'
     needs: [orchestrate, approval]
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger repo-a
-        run: |
+      - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-a") | .version')
           curl -X POST \
@@ -125,39 +122,13 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}"
-      - name: Trigger summary
-        run: |
-          echo "## prod-${{ inputs.environment }} Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Repository | Status / Approval Link |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|-----------|------------------------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| repo-a | https://github.com/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
-          if [[ "${{ needs.orchestrate.outputs.has_repo_b }}" == "true" ]]; then
-            echo "| repo-b | https://github.com/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "| repo-b | Skipped (version = NA) |" >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [[ "${{ needs.orchestrate.outputs.has_repo_c }}" == "true" ]]; then
-            echo "| repo-c | https://github.com/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "| repo-c | Skipped |" >> "$GITHUB_STEP_SUMMARY"
-
-  trigger-repo-b:
-    name: Trigger repo-b
-    if: needs.orchestrate.outputs.has_repo_b == 'true'
-    needs: [orchestrate, approval]
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "repo-b triggered"
 
   trigger-repo-c:
-    name: Trigger repo-c
     if: needs.orchestrate.outputs.has_repo_c == 'true'
     needs: [orchestrate, approval]
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger repo-c
-        run: |
+      - run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-c") | .version')
           curl -X POST \
@@ -167,20 +138,13 @@ jobs:
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}"
 
 # =========================================================
-# SECOND PHASE (prod-east after prod-west)
+# SECOND APPROVAL (ONLY FOR WEST → EAST)
 # =========================================================
-  orchestrate-east:
-    name: Build Release Plan (East)
-    if: inputs.action == 'prod-west-followed-by-prod-east'
-    needs: [trigger-repo-a, trigger-repo-b, trigger-repo-c]
+  approval-east:
+    name: Approve prod-east (after west)
+    if: inputs.environment == 'prod-west-followed-by-prod-east'
+    needs: [trigger-repo-a, trigger-repo-c]
     runs-on: ubuntu-latest
-    outputs:
-      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
-      region: ${{ steps.set-region.outputs.region }}
-      has_repo_a: ${{ steps.plan.outputs.has_repo_a }}
-      has_repo_b: ${{ steps.plan.outputs.has_repo_b }}
-      has_repo_c: ${{ steps.plan.outputs.has_repo_c }}
+    environment: prod-east
     steps:
-      - uses: actions/checkout@v4
-      - name: Set region
-        id:
+      - run: echo "Approved prod-east"
