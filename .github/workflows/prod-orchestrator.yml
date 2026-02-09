@@ -14,7 +14,7 @@ on:
         default: prod-west
 
 # =========================================================
-# PLAN & SUMMARY
+# BUILD PLAN
 # =========================================================
 jobs:
   orchestrate:
@@ -74,7 +74,7 @@ jobs:
           echo "|--------|---------|" >> "$GITHUB_STEP_SUMMARY"
 
           for repo in repo-a repo-b repo-c; do
-            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
+            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
 
             if [[ "$VERSION" == "NA" ]]; then
               echo "| $repo | Skipped (version = NA) |" >> "$GITHUB_STEP_SUMMARY"
@@ -103,7 +103,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
-      - run: echo "Release approved"
+      - run: echo "Approved"
 
 # =========================================================
 # TRIGGERS
@@ -114,25 +114,18 @@ jobs:
     needs: [orchestrate, approval]
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger repo-a safely
+      - name: Trigger repo-a
         run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-a") | .version')
 
-          for i in 1 2 3; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-              -H "Accept: application/vnd.github+json" \
-              -X POST \
-              https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
-              -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}")
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}"
 
-            [[ "$STATUS" == "204" ]] && break
-            echo "Retry $i failed with status $STATUS"
-            sleep 5
-          done
-
-      - name: Write triggered repos summary
+      - name: Trigger summary
         run: |
           echo "## prod-${{ inputs.environment }} Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -152,3 +145,19 @@ jobs:
           else
             echo "| repo-c | Skipped |" >> "$GITHUB_STEP_SUMMARY"
           fi
+
+  trigger-repo-b:
+    name: Trigger repo-b
+    if: needs.orchestrate.outputs.has_repo_b == 'true'
+    needs: [orchestrate, approval]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "repo-b triggered"
+
+  trigger-repo-c:
+    name: Trigger repo-c
+    if: needs.orchestrate.outputs.has_repo_c == 'true'
+    needs: [orchestrate, approval]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "repo-c triggered"
