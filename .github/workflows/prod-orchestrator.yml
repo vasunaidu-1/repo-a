@@ -15,16 +15,15 @@ on:
           - prod-west-followed-by-prod-east
         default: prod-west
 
+jobs:
 # =========================================================
 # PROD-WEST FLOW
 # =========================================================
-jobs:
   orchestrate-west:
-    if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west-followed-by-prod-east'
+    if: inputs.environment != 'prod-east'
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
-      region: us-west-2
       has_repo_a: ${{ steps.plan.outputs.has_repo_a }}
       has_repo_b: ${{ steps.plan.outputs.has_repo_b }}
       has_repo_c: ${{ steps.plan.outputs.has_repo_c }}
@@ -49,8 +48,7 @@ jobs:
       - name: Download manifest
         run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
-      - name: Build plan
-        id: plan
+      - id: plan
         run: |
           DATA=$(yq -o=json '.["us-west-2"]' manifest.yaml)
           HAS_A=false; HAS_B=false; HAS_C=false; PLAN='[]'
@@ -69,7 +67,7 @@ jobs:
           echo "has_repo_c=$HAS_C" >> $GITHUB_OUTPUT
 
   approval-west:
-    if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west-followed-by-prod-east'
+    if: inputs.environment != 'prod-east'
     needs: orchestrate-west
     runs-on: ubuntu-latest
     environment: prod-west
@@ -80,12 +78,11 @@ jobs:
 # PROD-EAST FLOW
 # =========================================================
   orchestrate-east:
-    if: inputs.environment == 'prod-east' || inputs.environment == 'prod-west-followed-by-prod-east'
-    needs: ${{ inputs.environment == 'prod-west-followed-by-prod-east' && 'approval-west' || '' }}
+    needs: approval-west
+    if: inputs.environment != 'prod-west'
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
-      region: us-east-1
       has_repo_a: ${{ steps.plan.outputs.has_repo_a }}
       has_repo_b: ${{ steps.plan.outputs.has_repo_b }}
       has_repo_c: ${{ steps.plan.outputs.has_repo_c }}
@@ -110,8 +107,7 @@ jobs:
       - name: Download manifest
         run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
-      - name: Build plan
-        id: plan
+      - id: plan
         run: |
           DATA=$(yq -o=json '.["us-east-1"]' manifest.yaml)
           HAS_A=false; HAS_B=false; HAS_C=false; PLAN='[]'
@@ -130,7 +126,7 @@ jobs:
           echo "has_repo_c=$HAS_C" >> $GITHUB_OUTPUT
 
   approval-east:
-    if: inputs.environment == 'prod-east' || inputs.environment == 'prod-west-followed-by-prod-east'
+    if: inputs.environment != 'prod-west'
     needs: orchestrate-east
     runs-on: ubuntu-latest
     environment: prod-east
