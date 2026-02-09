@@ -56,23 +56,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           DATA=$(yq -o=json '.["us-west-2"]' manifest.yaml)
 
-          PLAN_JSON='[]'
+          PLAN_JSON=$(echo "$DATA" | jq -c '
+            to_entries
+            | map(select(.value.version != "NA"))
+            | map({repo: .key, version: .value.version})
+          ')
 
           echo "## 📦 prod-west Release Plan" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
 
-          for repo in repo-a repo-b repo-c; do
-            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
-            if [[ "$VERSION" != "null" && "$VERSION" != "NA" ]]; then
-              echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
-              PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
-            else
-              echo "| $repo | NA (skipped) |" >> "$GITHUB_STEP_SUMMARY"
-            fi
-          done
+          echo "$DATA" | jq -r '
+            to_entries[]
+            | if .value.version == "NA"
+              then "| \(.key) | ⏭ skipped (NA) |"
+              else "| \(.key) | v\(.value.version) |"
+              end
+          ' >> "$GITHUB_STEP_SUMMARY"
 
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
 
@@ -89,7 +92,7 @@ jobs:
       - run: echo "prod-west approved"
 
 # =========================================================
-# PROD-WEST : TRIGGER (ACTUAL + VERIFIED)
+# PROD-WEST : TRIGGER (FIXED – LINKS ALWAYS SHOWN)
 # =========================================================
   trigger-west:
     name: Trigger prod-west repos
@@ -101,52 +104,48 @@ jobs:
       - name: Trigger repos and generate summary (west)
         shell: bash
         run: |
-          PLAN=$(echo '${{ needs.plan-west.outputs.plan_b64 }}' | base64 -d)
+          set -euo pipefail
 
-          ALL_REPOS=(repo-a repo-b repo-c)
-          TRIGGERED=()
-          SKIPPED=("${ALL_REPOS[@]}")
+          PLAN=$(echo '${{ needs.plan-west.outputs.plan_b64 }}' | base64 -d)
 
           echo "## 🚀 prod-west Trigger Results" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          for row in $(echo "$PLAN" | jq -c '.[]'); do
-            repo=$(echo "$row" | jq -r '.repo')
-            version=$(echo "$row" | jq -r '.version')
-
-            echo "Triggering $repo with version $version"
-
-            curl -f -X POST \
-              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-              -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml/dispatches \
-              -d "{
-                \"ref\": \"main\",
-                \"inputs\": {
-                  \"tag\": \"$version\",
-                  \"environment\": \"prod-west\",
-                  \"region\": \"us-west-2\"
-                }
-              }"
-
-            TRIGGERED+=("$repo")
-            SKIPPED=(${SKIPPED[@]/$repo})
-          done
-
           echo "### ✅ Triggered Repositories" >> "$GITHUB_STEP_SUMMARY"
-          for repo in "${TRIGGERED[@]}"; do
-            echo "- Triggered-$repo" >> "$GITHUB_STEP_SUMMARY"
-            echo "  https://github.com/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml" >> "$GITHUB_STEP_SUMMARY"
-          done
+
+          if [[ "$(echo "$PLAN" | jq length)" -eq 0 ]]; then
+            echo "_No repositories triggered_" >> "$GITHUB_STEP_SUMMARY"
+          else
+            for row in $(echo "$PLAN" | jq -c '.[]'); do
+              repo=$(echo "$row" | jq -r '.repo')
+              version=$(echo "$row" | jq -r '.version')
+
+              curl -f -X POST \
+                -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+                -H "Accept: application/vnd.github+json" \
+                https://api.github.com/repos/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml/dispatches \
+                -d "{
+                  \"ref\": \"main\",
+                  \"inputs\": {
+                    \"tag\": \"$version\",
+                    \"environment\": \"prod-west\",
+                    \"region\": \"us-west-2\"
+                  }
+                }"
+
+              echo "- Triggered-$repo" >> "$GITHUB_STEP_SUMMARY"
+              echo "  👉 https://github.com/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml" >> "$GITHUB_STEP_SUMMARY"
+            done
+          fi
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### ⏭ Skipped Repositories (NA in manifest)" >> "$GITHUB_STEP_SUMMARY"
-          for repo in "${SKIPPED[@]}"; do
-            echo "- Skipped-$repo" >> "$GITHUB_STEP_SUMMARY"
-          done
+
+          yq -r '.["us-west-2"] | to_entries[] | select(.value.version=="NA") | "- Skipped-\(.key)"' manifest.yaml \
+            >> "$GITHUB_STEP_SUMMARY"
 
 # =========================================================
-# PROD-EAST : BUILD & PLAN (AFTER WEST)
+# PROD-EAST : BUILD & PLAN
 # =========================================================
   plan-east:
     name: Build & Plan (prod-east)
@@ -183,22 +182,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           DATA=$(yq -o=json '.["us-east-1"]' manifest.yaml)
-          PLAN_JSON='[]'
+
+          PLAN_JSON=$(echo "$DATA" | jq -c '
+            to_entries
+            | map(select(.value.version != "NA"))
+            | map({repo: .key, version: .value.version})
+          ')
 
           echo "## 📦 prod-east Release Plan" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
 
-          for repo in repo-a repo-b repo-c; do
-            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
-            if [[ "$VERSION" != "null" && "$VERSION" != "NA" ]]; then
-              echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
-              PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
-            else
-              echo "| $repo | NA (skipped) |" >> "$GITHUB_STEP_SUMMARY"
-            fi
-          done
+          echo "$DATA" | jq -r '
+            to_entries[]
+            | if .value.version == "NA"
+              then "| \(.key) | ⏭ skipped (NA) |"
+              else "| \(.key) | v\(.value.version) |"
+              end
+          ' >> "$GITHUB_STEP_SUMMARY"
 
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
 
@@ -215,7 +218,7 @@ jobs:
       - run: echo "prod-east approved"
 
 # =========================================================
-# PROD-EAST : TRIGGER (SAME AS WEST)
+# PROD-EAST : TRIGGER
 # =========================================================
   trigger-east:
     name: Trigger prod-east repos
@@ -227,46 +230,42 @@ jobs:
       - name: Trigger repos and generate summary (east)
         shell: bash
         run: |
-          PLAN=$(echo '${{ needs.plan-east.outputs.plan_b64 }}' | base64 -d)
+          set -euo pipefail
 
-          ALL_REPOS=(repo-a repo-b repo-c)
-          TRIGGERED=()
-          SKIPPED=("${ALL_REPOS[@]}")
+          PLAN=$(echo '${{ needs.plan-east.outputs.plan_b64 }}' | base64 -d)
 
           echo "## 🚀 prod-east Trigger Results" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          for row in $(echo "$PLAN" | jq -c '.[]'); do
-            repo=$(echo "$row" | jq -r '.repo')
-            version=$(echo "$row" | jq -r '.version')
-
-            echo "Triggering $repo with version $version"
-
-            curl -f -X POST \
-              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-              -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml/dispatches \
-              -d "{
-                \"ref\": \"main\",
-                \"inputs\": {
-                  \"tag\": \"$version\",
-                  \"environment\": \"prod-east\",
-                  \"region\": \"us-east-1\"
-                }
-              }"
-
-            TRIGGERED+=("$repo")
-            SKIPPED=(${SKIPPED[@]/$repo})
-          done
-
           echo "### ✅ Triggered Repositories" >> "$GITHUB_STEP_SUMMARY"
-          for repo in "${TRIGGERED[@]}"; do
-            echo "- Triggered-$repo" >> "$GITHUB_STEP_SUMMARY"
-            echo "  https://github.com/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml" >> "$GITHUB_STEP_SUMMARY"
-          done
+
+          if [[ "$(echo "$PLAN" | jq length)" -eq 0 ]]; then
+            echo "_No repositories triggered_" >> "$GITHUB_STEP_SUMMARY"
+          else
+            for row in $(echo "$PLAN" | jq -c '.[]'); do
+              repo=$(echo "$row" | jq -r '.repo')
+              version=$(echo "$row" | jq -r '.version')
+
+              curl -f -X POST \
+                -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+                -H "Accept: application/vnd.github+json" \
+                https://api.github.com/repos/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml/dispatches \
+                -d "{
+                  \"ref\": \"main\",
+                  \"inputs\": {
+                    \"tag\": \"$version\",
+                    \"environment\": \"prod-east\",
+                    \"region\": \"us-east-1\"
+                  }
+                }"
+
+              echo "- Triggered-$repo" >> "$GITHUB_STEP_SUMMARY"
+              echo "  👉 https://github.com/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml" >> "$GITHUB_STEP_SUMMARY"
+            done
+          fi
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### ⏭ Skipped Repositories (NA in manifest)" >> "$GITHUB_STEP_SUMMARY"
-          for repo in "${SKIPPED[@]}"; do
-            echo "- Skipped-$repo" >> "$GITHUB_STEP_SUMMARY"
-          done
+
+          yq -r '.["us-east-1"] | to_entries[] | select(.value.version=="NA") | "- Skipped-\(.key)"' manifest.yaml \
+            >> "$GITHUB_STEP_SUMMARY"
