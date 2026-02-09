@@ -47,13 +47,6 @@ jobs:
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ steps.set-region.outputs.region }}
-
       - name: Download manifest
         run: |
           aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
@@ -72,7 +65,7 @@ jobs:
           HAS_C=false
           PLAN_JSON='[]'
 
-          echo "## 📦 prod-${{ inputs.environment }} Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "## prod-${{ inputs.environment }} Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Operation:** ${{ inputs.action }}" >> "$GITHUB_STEP_SUMMARY"
           echo "**Environment:** ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
@@ -84,7 +77,7 @@ jobs:
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
 
             if [[ "$VERSION" == "NA" ]]; then
-              echo "| $repo | ⏭️ Skipped (version = NA) |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| $repo | Skipped (version = NA) |" >> "$GITHUB_STEP_SUMMARY"
 
             elif [[ -n "$VERSION" && "$VERSION" != "null" && "$VERSION" != "not_applicable" ]]; then
               echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
@@ -121,22 +114,27 @@ jobs:
     needs: [orchestrate, approval]
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger repo-a
+      - name: Trigger repo-a safely
         run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-a") | .version')
 
-          curl -f -X POST \
-            -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}"
+          for i in 1 2 3; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              -X POST \
+              https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
+              -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}")
+
+            [[ "$STATUS" == "204" ]] && break
+            echo "Retry $i failed with status $STATUS"
+            sleep 5
+          done
 
       - name: Write triggered repos summary
         run: |
-          echo "## 🚀 prod-${{ inputs.environment }} Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Click the links below to approve deployments:" >> "$GITHUB_STEP_SUMMARY"
+          echo "## prod-${{ inputs.environment }} Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repository | Status / Approval Link |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-----------|------------------------|" >> "$GITHUB_STEP_SUMMARY"
@@ -146,27 +144,11 @@ jobs:
           if [[ "${{ needs.orchestrate.outputs.has_repo_b }}" == "true" ]]; then
             echo "| repo-b | https://github.com/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "| repo-b | ⏭️ Skipped (version = NA) |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| repo-b | Skipped (version = NA) |" >> "$GITHUB_STEP_SUMMARY"
           fi
 
           if [[ "${{ needs.orchestrate.outputs.has_repo_c }}" == "true" ]]; then
             echo "| repo-c | https://github.com/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "| repo-c | ⏭️ Skipped |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| repo-c | Skipped |" >> "$GITHUB_STEP_SUMMARY"
           fi
-
-  trigger-repo-b:
-    name: Trigger repo-b
-    if: needs.orchestrate.outputs.has_repo_b == 'true'
-    needs: [orchestrate, approval]
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "repo-b triggered"
-
-  trigger-repo-c:
-    name: Trigger repo-c
-    if: needs.orchestrate.outputs.has_repo_c == 'true'
-    needs: [orchestrate, approval]
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "repo-c triggered"
