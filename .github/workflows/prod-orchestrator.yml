@@ -47,16 +47,17 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-west-2
 
-      - name: Download manifest
+      - name: Download manifest from S3
         run: |
           aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
-      - name: Build plan summary (west)
+      - name: Build release plan summary (west)
         id: plan
         shell: bash
         run: |
           set -euo pipefail
           DATA=$(yq -o=json '.["us-west-2"]' manifest.yaml)
+
           PLAN_JSON='[]'
 
           echo "## 📦 prod-west Release Plan" >> "$GITHUB_STEP_SUMMARY"
@@ -69,7 +70,7 @@ jobs:
               echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
               PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
             else
-              echo "| $repo | ⏭ skipped (NA) |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| $repo | NA (skipped) |" >> "$GITHUB_STEP_SUMMARY"
             fi
           done
 
@@ -88,7 +89,7 @@ jobs:
       - run: echo "prod-west approved"
 
 # =========================================================
-# PROD-WEST : TRIGGER
+# PROD-WEST : TRIGGER (ACTUAL + VERIFIED)
 # =========================================================
   trigger-west:
     name: Trigger prod-west repos
@@ -97,7 +98,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Trigger repos and summary (west)
+      - name: Trigger repos and generate summary (west)
         shell: bash
         run: |
           PLAN=$(echo '${{ needs.plan-west.outputs.plan_b64 }}' | base64 -d)
@@ -107,21 +108,24 @@ jobs:
           SKIPPED=("${ALL_REPOS[@]}")
 
           echo "## 🚀 prod-west Trigger Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
           for row in $(echo "$PLAN" | jq -c '.[]'); do
             repo=$(echo "$row" | jq -r '.repo')
             version=$(echo "$row" | jq -r '.version')
+
+            echo "Triggering $repo with version $version"
 
             curl -f -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
               -H "Accept: application/vnd.github+json" \
               https://api.github.com/repos/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml/dispatches \
               -d "{
-                \"ref\":\"main\",
-                \"inputs\":{
-                  \"tag\":\"$version\",
-                  \"environment\":\"prod-west\",
-                  \"region\":\"us-west-2\"
+                \"ref\": \"main\",
+                \"inputs\": {
+                  \"tag\": \"$version\",
+                  \"environment\": \"prod-west\",
+                  \"region\": \"us-west-2\"
                 }
               }"
 
@@ -129,22 +133,20 @@ jobs:
             SKIPPED=(${SKIPPED[@]/$repo})
           done
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### ✅ Triggered Repositories" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Repo | Approval Link |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|------|---------------|" >> "$GITHUB_STEP_SUMMARY"
           for repo in "${TRIGGERED[@]}"; do
-            echo "| $repo | https://github.com/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Triggered-$repo" >> "$GITHUB_STEP_SUMMARY"
+            echo "  https://github.com/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml" >> "$GITHUB_STEP_SUMMARY"
           done
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### ⏭ Skipped Repositories (NA in manifest)" >> "$GITHUB_STEP_SUMMARY"
           for repo in "${SKIPPED[@]}"; do
-            echo "- $repo" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Skipped-$repo" >> "$GITHUB_STEP_SUMMARY"
           done
 
 # =========================================================
-# PROD-EAST : PLAN
+# PROD-EAST : BUILD & PLAN (AFTER WEST)
 # =========================================================
   plan-east:
     name: Build & Plan (prod-east)
@@ -172,11 +174,11 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Download manifest
+      - name: Download manifest from S3
         run: |
           aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
-      - name: Build plan summary (east)
+      - name: Build release plan summary (east)
         id: plan
         shell: bash
         run: |
@@ -194,7 +196,7 @@ jobs:
               echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
               PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
             else
-              echo "| $repo | ⏭ skipped (NA) |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| $repo | NA (skipped) |" >> "$GITHUB_STEP_SUMMARY"
             fi
           done
 
@@ -213,7 +215,7 @@ jobs:
       - run: echo "prod-east approved"
 
 # =========================================================
-# PROD-EAST : TRIGGER
+# PROD-EAST : TRIGGER (SAME AS WEST)
 # =========================================================
   trigger-east:
     name: Trigger prod-east repos
@@ -222,7 +224,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Trigger repos and summary (east)
+      - name: Trigger repos and generate summary (east)
         shell: bash
         run: |
           PLAN=$(echo '${{ needs.plan-east.outputs.plan_b64 }}' | base64 -d)
@@ -232,21 +234,24 @@ jobs:
           SKIPPED=("${ALL_REPOS[@]}")
 
           echo "## 🚀 prod-east Trigger Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
           for row in $(echo "$PLAN" | jq -c '.[]'); do
             repo=$(echo "$row" | jq -r '.repo')
             version=$(echo "$row" | jq -r '.version')
+
+            echo "Triggering $repo with version $version"
 
             curl -f -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
               -H "Accept: application/vnd.github+json" \
               https://api.github.com/repos/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml/dispatches \
               -d "{
-                \"ref\":\"main\",
-                \"inputs\":{
-                  \"tag\":\"$version\",
-                  \"environment\":\"prod-east\",
-                  \"region\":\"us-east-1\"
+                \"ref\": \"main\",
+                \"inputs\": {
+                  \"tag\": \"$version\",
+                  \"environment\": \"prod-east\",
+                  \"region\": \"us-east-1\"
                 }
               }"
 
@@ -254,16 +259,14 @@ jobs:
             SKIPPED=(${SKIPPED[@]/$repo})
           done
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### ✅ Triggered Repositories" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Repo | Approval Link |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|------|---------------|" >> "$GITHUB_STEP_SUMMARY"
           for repo in "${TRIGGERED[@]}"; do
-            echo "| $repo | https://github.com/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Triggered-$repo" >> "$GITHUB_STEP_SUMMARY"
+            echo "  https://github.com/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml" >> "$GITHUB_STEP_SUMMARY"
           done
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### ⏭ Skipped Repositories (NA in manifest)" >> "$GITHUB_STEP_SUMMARY"
           for repo in "${SKIPPED[@]}"; do
-            echo "- $repo" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Skipped-$repo" >> "$GITHUB_STEP_SUMMARY"
           done
