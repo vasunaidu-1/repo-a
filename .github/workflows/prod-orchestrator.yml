@@ -25,7 +25,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
-      region: us-west-2
       has_repo_a: ${{ steps.plan.outputs.has_repo_a }}
       has_repo_b: ${{ steps.plan.outputs.has_repo_b }}
       has_repo_c: ${{ steps.plan.outputs.has_repo_c }}
@@ -54,7 +53,6 @@ jobs:
       - name: Build plan
         id: plan
         run: |
-          set -euo pipefail
           DATA=$(yq -o=json ".\"us-west-2\"" manifest.yaml)
           HAS_A=false; HAS_B=false; HAS_C=false
           PLAN_JSON='[]'
@@ -65,7 +63,7 @@ jobs:
 
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
-            [[ "$VERSION" == "NA" || -z "$VERSION" || "$VERSION" == "null" ]] && continue
+            [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
             echo "| $repo | v$VERSION |" >> $GITHUB_STEP_SUMMARY
             PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
             [[ "$repo" == "repo-a" ]] && HAS_A=true
@@ -89,21 +87,20 @@ jobs:
       - run: echo "Approved prod-west"
 
 # =========================================================
-# TRIGGERS – PROD WEST (REAL)
+# TRIGGERS – PROD WEST
 # =========================================================
   trigger-repos-west:
     needs: [orchestrate-west, approval-west]
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger repos (west)
-        run: |
+      - run: |
           PLAN=$(echo "${{ needs.orchestrate-west.outputs.plan_b64 }}" | base64 -d)
 
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$PLAN" | jq -r ".[] | select(.repo==\"$repo\") | .version")
             [[ -z "$VERSION" || "$VERSION" == "null" ]] && continue
 
-            curl -s -X POST \
+            curl -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
               -H "Accept: application/vnd.github+json" \
               https://api.github.com/repos/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml/dispatches \
@@ -118,11 +115,89 @@ jobs:
           echo "| repo-c | https://github.com/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml |" >> $GITHUB_STEP_SUMMARY
 
 # =========================================================
-# ORCHESTRATE – PROD EAST (ONLY AFTER WEST)
+# ORCHESTRATE – PROD EAST
 # =========================================================
   orchestrate-east:
-    if: inputs.environment == 'prod-west-followed-by-prod-east'
+    if: inputs.environment != 'prod-west'
     needs: trigger-repos-west
     runs-on: ubuntu-latest
+    outputs:
+      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
+
     steps:
-      - run: echo "Repeat SAME LOGIC as west but with us-east-1 and prod-east"
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x yq_linux_amd64
+          sudo mv yq_linux_amd64 /usr/local/bin/yq
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Download manifest
+        run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
+
+      - name: Build plan
+        id: plan
+        run: |
+          DATA=$(yq -o=json ".\"us-east-1\"" manifest.yaml)
+          PLAN_JSON='[]'
+
+          echo "## prod-east Build & Release Plan" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|---------|" >> $GITHUB_STEP_SUMMARY
+
+          for repo in repo-a repo-b repo-c; do
+            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
+            [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
+            echo "| $repo | v$VERSION |" >> $GITHUB_STEP_SUMMARY
+            PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
+          done
+
+          echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> $GITHUB_OUTPUT
+
+# =========================================================
+# APPROVAL – PROD EAST
+# =========================================================
+  approval-east:
+    needs: orchestrate-east
+    runs-on: ubuntu-latest
+    environment: prod-east
+    steps:
+      - run: echo "Approved prod-east"
+
+# =========================================================
+# TRIGGERS – PROD EAST
+# =========================================================
+  trigger-repos-east:
+    needs: [orchestrate-east, approval-east]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          PLAN=$(echo "${{ needs.orchestrate-east.outputs.plan_b64 }}" | base64 -d)
+
+          for repo in repo-a repo-b repo-c; do
+            VERSION=$(echo "$PLAN" | jq -r ".[] | select(.repo==\"$repo\") | .version")
+            [[ -z "$VERSION" || "$VERSION" == "null" ]] && continue
+
+            curl -X POST \
+              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/vasunaidu-1/$repo/actions/workflows/prod-deploy.yml/dispatches \
+              -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"prod-east\",\"region\":\"us-east-1\"}}"
+          done
+
+          echo "## prod-east Repositories Triggered" >> $GITHUB_STEP_SUMMARY
+          echo "| Repository | Workflow |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| repo-a | https://github.com/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml |" >> $GITHUB_STEP_SUMMARY
+          echo "| repo-b | https://github.com/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml |" >> $GITHUB_STEP_SUMMARY
+          echo "| repo-c | https://github.com/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml |" >> $GITHUB_STEP_SUMMARY
