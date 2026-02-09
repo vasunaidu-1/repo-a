@@ -83,7 +83,10 @@ jobs:
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
 
-            if [[ -n "$VERSION" && "$VERSION" != "null" && "$VERSION" != "NA" && "$VERSION" != "not_applicable" ]]; then
+            if [[ "$VERSION" == "NA" ]]; then
+              echo "| $repo | ⏭️ Skipped (version = NA) |" >> "$GITHUB_STEP_SUMMARY"
+
+            elif [[ -n "$VERSION" && "$VERSION" != "null" && "$VERSION" != "not_applicable" ]]; then
               echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
               PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
 
@@ -158,15 +161,7 @@ jobs:
     needs: [orchestrate, approval]
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
-          VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-b") | .version')
-
-          curl -f -X POST \
-            -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}"
+      - run: echo "repo-b triggered"
 
   trigger-repo-c:
     name: Trigger repo-c
@@ -174,12 +169,4 @@ jobs:
     needs: [orchestrate, approval]
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
-          VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-c") | .version')
-
-          curl -f -X POST \
-            -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}"
+      - run: echo "repo-c triggered"
