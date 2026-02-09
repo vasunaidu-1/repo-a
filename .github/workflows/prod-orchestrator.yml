@@ -108,7 +108,7 @@ jobs:
       - run: echo "Release plan approved"
 
 # =========================================================
-# TRIGGERS
+# TRIGGERS (NO SUMMARY OUTPUT HERE)
 # =========================================================
   trigger-repo-a:
     name: Trigger repo-a
@@ -159,10 +159,10 @@ jobs:
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}"
 
 # =========================================================
-# FINAL SUMMARY (SINGLE BOX)
+# FINAL SUMMARY (ONE BOX ONLY)
 # =========================================================
   final-summary:
-    name: Deployment Links Summary
+    name: Triggered Repositories Summary
     needs:
       - orchestrate
       - trigger-repo-a
