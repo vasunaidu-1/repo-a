@@ -225,9 +225,14 @@ jobs:
           DATA=$(yq -o=json ".\"us-east-1\"" manifest.yaml)
           PLAN_JSON='[]'
 
+          echo "## prod-east Build & Release Plan" >> $GITHUB_STEP_SUMMARY
+          echo "| Repository | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|---------|" >> $GITHUB_STEP_SUMMARY
+
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
             [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
+            echo "| $repo | v$VERSION |" >> $GITHUB_STEP_SUMMARY
             PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
           done
 
