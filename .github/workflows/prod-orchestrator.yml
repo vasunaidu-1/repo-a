@@ -47,7 +47,6 @@ jobs:
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
 
-      # ✅ THIS WAS MISSING — PUT BACK
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -122,7 +121,8 @@ jobs:
     needs: [orchestrate, approval]
     runs-on: ubuntu-latest
     steps:
-      - run: |
+      - name: Trigger repo-a
+        run: |
           PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
           VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-a") | .version')
 
@@ -132,7 +132,8 @@ jobs:
             https://api.github.com/repos/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml/dispatches \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}"
 
-      - run: |
+      - name: Trigger summary
+        run: |
           echo "## prod-${{ inputs.environment }} Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repository | Status / Approval Link |" >> "$GITHUB_STEP_SUMMARY"
@@ -166,4 +167,13 @@ jobs:
     needs: [orchestrate, approval]
     runs-on: ubuntu-latest
     steps:
-      - run: echo "repo-c triggered"
+      - name: Trigger repo-c
+        run: |
+          PLAN=$(echo "${{ needs.orchestrate.outputs.plan_b64 }}" | base64 -d)
+          VERSION=$(echo "$PLAN" | jq -r '.[] | select(.repo=="repo-c") | .version')
+
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"${{ inputs.environment }}\",\"region\":\"${{ needs.orchestrate.outputs.region }}\"}}"
