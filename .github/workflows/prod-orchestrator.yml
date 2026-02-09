@@ -83,7 +83,6 @@ jobs:
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version")
 
-            # ✅ SKIP null / NA / not_applicable
             if [[ -n "$VERSION" && "$VERSION" != "null" && "$VERSION" != "NA" && "$VERSION" != "not_applicable" ]]; then
               echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
               PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
@@ -136,17 +135,21 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Click the links below to approve deployments:" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Repository | Approval Link |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|-----------|---------------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repository | Status / Approval Link |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----------|------------------------|" >> "$GITHUB_STEP_SUMMARY"
 
           echo "| repo-a | https://github.com/vasunaidu-1/repo-a/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
 
           if [[ "${{ needs.orchestrate.outputs.has_repo_b }}" == "true" ]]; then
             echo "| repo-b | https://github.com/vasunaidu-1/repo-b/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| repo-b | ⏭️ Skipped (version = NA) |" >> "$GITHUB_STEP_SUMMARY"
           fi
 
           if [[ "${{ needs.orchestrate.outputs.has_repo_c }}" == "true" ]]; then
             echo "| repo-c | https://github.com/vasunaidu-1/repo-c/actions/workflows/prod-deploy.yml |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| repo-c | ⏭️ Skipped |" >> "$GITHUB_STEP_SUMMARY"
           fi
 
   trigger-repo-b:
