@@ -36,6 +36,7 @@ jobs:
           wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
+
       - name: Configure AWS (west)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -52,16 +53,20 @@ jobs:
           set -euo pipefail
           DATA=$(yq -o=json ".\"us-west-2\"" manifest.yaml)
           PLAN_JSON='[]'
+
           echo "## prod-west Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
+
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
             [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
             echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
             PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
           done
+
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
 # =========================================================
 # APPROVAL – PROD WEST
 # =========================================================
@@ -73,23 +78,27 @@ jobs:
       - run: echo "Approved prod-west"
 
 # =========================================================
-# TRIGGER REPOS – PROD WEST (FIXED)
+# TRIGGER REPOS – PROD WEST
 # =========================================================
   trigger-west:
-    needs: [plan-west, approve-west]   # 🔥 FIX IS HERE
+    needs: [plan-west, approve-west]
     runs-on: ubuntu-latest
     steps:
       - name: Trigger repos (west)
         run: |
           set -euo pipefail
           PLAN=$(echo "${{ needs.plan-west.outputs.plan_b64 }}" | base64 -d)
+
           echo "## prod-west Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Workflow |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|----------|" >> "$GITHUB_STEP_SUMMARY"
+
           mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
+
           for entry in "${REPOS[@]}"; do
             REPO="${entry%%|*}"
             VERSION="${entry##*|}"
+
             curl -f -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
               -H "Accept: application/vnd.github+json" \
@@ -99,11 +108,14 @@ jobs:
                 \"client_payload\": {
                   \"tag\": \"$VERSION\",
                   \"environment\": \"prod-west\",
-                  \"region\": \"us-west-2\"
+                  \"region\": \"us-west-2\",
+                  \"operation\": \"${{ inputs.action }}\"
                 }
               }"
+
             echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
           done
+
 # =========================================================
 # PLAN + SUMMARY – PROD EAST
 # =========================================================
@@ -124,6 +136,7 @@ jobs:
           wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
+
       - name: Configure AWS (east)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -140,16 +153,20 @@ jobs:
           set -euo pipefail
           DATA=$(yq -o=json ".\"us-east-1\"" manifest.yaml)
           PLAN_JSON='[]'
+
           echo "## prod-east Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
+
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
             [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
             echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
             PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
           done
+
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
 # =========================================================
 # APPROVAL – PROD EAST
 # =========================================================
@@ -161,23 +178,27 @@ jobs:
       - run: echo "Approved prod-east"
 
 # =========================================================
-# TRIGGER REPOS – PROD EAST (FIXED)
+# TRIGGER REPOS – PROD EAST
 # =========================================================
   trigger-east:
-    needs: [plan-east, approve-east]   # 🔥 FIX IS HERE
+    needs: [plan-east, approve-east]
     runs-on: ubuntu-latest
     steps:
       - name: Trigger repos (east)
         run: |
           set -euo pipefail
           PLAN=$(echo "${{ needs.plan-east.outputs.plan_b64 }}" | base64 -d)
+
           echo "## prod-east Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Workflow |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|----------|" >> "$GITHUB_STEP_SUMMARY"
+
           mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
+
           for entry in "${REPOS[@]}"; do
             REPO="${entry%%|*}"
             VERSION="${entry##*|}"
+
             curl -f -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
               -H "Accept: application/vnd.github+json" \
@@ -187,8 +208,10 @@ jobs:
                 \"client_payload\": {
                   \"tag\": \"$VERSION\",
                   \"environment\": \"prod-east\",
-                  \"region\": \"us-east-1\"
+                  \"region\": \"us-east-1\",
+                  \"operation\": \"${{ inputs.action }}\"
                 }
               }"
+
             echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
           done
