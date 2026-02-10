@@ -18,7 +18,7 @@ on:
 
 jobs:
 # =========================================================
-# PLAN – PROD WEST
+# PLAN + SUMMARY – PROD WEST
 # =========================================================
   plan-west:
     if: inputs.environment != 'prod-east'
@@ -27,7 +27,6 @@ jobs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Install tools
         run: |
           sudo apt-get update
@@ -35,17 +34,14 @@ jobs:
           wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
-
       - name: Configure AWS (west)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-west-2
-
       - name: Download manifest
         run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
-
       - name: Build summary
         id: plan
         run: |
@@ -75,7 +71,7 @@ jobs:
       - run: echo "Approved prod-west"
 
 # =========================================================
-# TRIGGER – PROD WEST
+# TRIGGER REPOS – PROD WEST
 # =========================================================
   trigger-west:
     if: inputs.environment != 'prod-east'
@@ -110,7 +106,7 @@ jobs:
           done
 
 # =========================================================
-# PLAN – PROD EAST (AFTER WEST)
+# PLAN + SUMMARY – PROD EAST (AFTER WEST)
 # =========================================================
   plan-east:
     if: inputs.environment == 'prod-west-followed-by-prod-east'
@@ -120,17 +116,14 @@ jobs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Configure AWS (east)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-
       - name: Download manifest
         run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
-
       - name: Build summary
         id: plan
         run: |
@@ -149,7 +142,7 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
 
 # =========================================================
-# PLAN – PROD EAST ONLY
+# PLAN + SUMMARY – PROD EAST ONLY
 # =========================================================
   plan-east-only:
     if: inputs.environment == 'prod-east'
@@ -158,17 +151,14 @@ jobs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Configure AWS (east)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-
       - name: Download manifest
         run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
-
       - name: Build summary
         id: plan
         run: |
@@ -209,7 +199,7 @@ jobs:
       - run: echo "Approved prod-east"
 
 # =========================================================
-# TRIGGER – PROD EAST (AFTER WEST)
+# TRIGGER REPOS – PROD EAST (AFTER WEST)
 # =========================================================
   trigger-east:
     if: inputs.environment == 'prod-west-followed-by-prod-east'
@@ -244,7 +234,7 @@ jobs:
           done
 
 # =========================================================
-# TRIGGER – PROD EAST ONLY
+# TRIGGER REPOS – PROD EAST ONLY
 # =========================================================
   trigger-east-only:
     if: inputs.environment == 'prod-east'
