@@ -18,9 +18,9 @@ on:
 
 jobs:
 # =========================================================
-# ORCHESTRATE – PROD WEST
+# BUILD PLAN + SUMMARY (PROD WEST)
 # =========================================================
-  orchestrate-west:
+  plan-west:
     if: inputs.environment != 'prod-east'
     runs-on: ubuntu-latest
     outputs:
@@ -37,26 +37,20 @@ jobs:
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
 
-      - name: Configure AWS (west)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-west-2
-
       - name: Download manifest
-        run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
+        run: |
+          aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
-      - name: Build plan (west)
+      - name: Build summary
         id: plan
         run: |
           set -euo pipefail
           DATA=$(yq -o=json ".\"us-west-2\"" manifest.yaml)
           PLAN_JSON='[]'
 
-          echo "## prod-west Build & Release Plan" >> $GITHUB_STEP_SUMMARY
-          echo "| Repo | Version |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "## prod-west Release Plan" >> $GITHUB_STEP_SUMMARY
+          echo "| Repository | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|---------|" >> $GITHUB_STEP_SUMMARY
 
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
@@ -68,22 +62,30 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> $GITHUB_OUTPUT
 
 # =========================================================
-# TRIGGER – PROD WEST (repository_dispatch)
+# APPROVAL (AFTER SUMMARY)
 # =========================================================
-  trigger-repos-west:
-    needs: orchestrate-west
+  approve-west:
+    needs: plan-west
+    runs-on: ubuntu-latest
+    environment: prod-west
+    steps:
+      - run: echo "Approved prod-west"
+
+# =========================================================
+# TRIGGER REPOS (PROD WEST) — AUTO ONLY
+# =========================================================
+  trigger-west:
+    needs: approve-west
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger repos (prod-west)
+      - name: Trigger repos (repository_dispatch)
         run: |
           set -euo pipefail
-          PLAN_JSON=$(echo "${{ needs.orchestrate-west.outputs.plan_b64 }}" | base64 -d)
+          PLAN=$(echo "${{ needs.plan-west.outputs.plan_b64 }}" | base64 -d)
 
           echo "## prod-west Repositories Triggered" >> $GITHUB_STEP_SUMMARY
-          echo "| Repo | Workflow |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|----------|" >> $GITHUB_STEP_SUMMARY
 
-          echo "$PLAN_JSON" | jq -c '.[]' | while read -r item; do
+          echo "$PLAN" | jq -c '.[]' | while read -r item; do
             REPO=$(echo "$item" | jq -r '.repo')
             VERSION=$(echo "$item" | jq -r '.version')
 
@@ -99,167 +101,4 @@ jobs:
                   \"region\": \"us-west-2\"
                 }
               }"
-
-            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> $GITHUB_STEP_SUMMARY
-          done
-
-# =========================================================
-# ORCHESTRATE – PROD EAST (DIRECT)
-# =========================================================
-  orchestrate-east-direct:
-    if: inputs.environment == 'prod-east'
-    runs-on: ubuntu-latest
-    outputs:
-      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
-          wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          chmod +x yq_linux_amd64
-          sudo mv yq_linux_amd64 /usr/local/bin/yq
-
-      - name: Configure AWS (east)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      - name: Download manifest
-        run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
-
-      - name: Build plan (east)
-        id: plan
-        run: |
-          DATA=$(yq -o=json ".\"us-east-1\"" manifest.yaml)
-          PLAN_JSON='[]'
-
-          echo "## prod-east Build & Release Plan" >> $GITHUB_STEP_SUMMARY
-          echo "| Repo | Version |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
-
-          for repo in repo-a repo-b repo-c; do
-            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
-            [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
-            echo "| $repo | v$VERSION |" >> $GITHUB_STEP_SUMMARY
-            PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
-          done
-
-          echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> $GITHUB_OUTPUT
-
-# =========================================================
-# TRIGGER – PROD EAST (DIRECT)
-# =========================================================
-  trigger-repos-east-direct:
-    needs: orchestrate-east-direct
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger repos (prod-east)
-        run: |
-          PLAN_JSON=$(echo "${{ needs.orchestrate-east-direct.outputs.plan_b64 }}" | base64 -d)
-
-          echo "## prod-east Repositories Triggered" >> $GITHUB_STEP_SUMMARY
-          echo "| Repo | Workflow |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|----------|" >> $GITHUB_STEP_SUMMARY
-
-          echo "$PLAN_JSON" | jq -c '.[]' | while read -r item; do
-            REPO=$(echo "$item" | jq -r '.repo')
-            VERSION=$(echo "$item" | jq -r '.version')
-
-            curl -f -X POST \
-              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-              -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/vasunaidu-1/$REPO/dispatches \
-              -d "{
-                \"event_type\": \"prod-deploy\",
-                \"client_payload\": {
-                  \"tag\": \"$VERSION\",
-                  \"environment\": \"prod-east\",
-                  \"region\": \"us-east-1\"
-                }
-              }"
-
-            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> $GITHUB_STEP_SUMMARY
-          done
-
-# =========================================================
-# ORCHESTRATE – PROD EAST (AFTER WEST)
-# =========================================================
-  orchestrate-east-after-west:
-    if: inputs.environment == 'prod-west-followed-by-prod-east'
-    needs: trigger-repos-west
-    runs-on: ubuntu-latest
-    outputs:
-      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS (east)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      - name: Download manifest
-        run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
-
-      - name: Build plan (east)
-        id: plan
-        run: |
-          DATA=$(yq -o=json ".\"us-east-1\"" manifest.yaml)
-          PLAN_JSON='[]'
-
-          echo "## prod-east Build & Release Plan" >> $GITHUB_STEP_SUMMARY
-          echo "| Repo | Version |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
-
-          for repo in repo-a repo-b repo-c; do
-            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
-            [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
-            echo "| $repo | v$VERSION |" >> $GITHUB_STEP_SUMMARY
-            PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
-          done
-
-          echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> $GITHUB_OUTPUT
-
-# =========================================================
-# TRIGGER – PROD EAST (AFTER WEST)
-# =========================================================
-  trigger-repos-east-after-west:
-    needs: orchestrate-east-after-west
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger repos (prod-east)
-        run: |
-          PLAN_JSON=$(echo "${{ needs.orchestrate-east-after-west.outputs.plan_b64 }}" | base64 -d)
-
-          echo "## prod-east Repositories Triggered" >> $GITHUB_STEP_SUMMARY
-          echo "| Repo | Workflow |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|----------|" >> $GITHUB_STEP_SUMMARY
-
-          echo "$PLAN_JSON" | jq -c '.[]' | while read -r item; do
-            REPO=$(echo "$item" | jq -r '.repo')
-            VERSION=$(echo "$item" | jq -r '.version')
-
-            curl -f -X POST \
-              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-              -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/vasunaidu-1/$REPO/dispatches \
-              -d "{
-                \"event_type\": \"prod-deploy\",
-                \"client_payload\": {
-                  \"tag\": \"$VERSION\",
-                  \"environment\": \"prod-east\",
-                  \"region\": \"us-east-1\"
-                }
-              }"
-
-            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> $GITHUB_STEP_SUMMARY
           done
