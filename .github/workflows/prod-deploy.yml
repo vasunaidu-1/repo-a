@@ -2,20 +2,12 @@ name: Production Deployment
 run-name: prod-${{ github.event.client_payload.operation }}
 
 on:
-  # =========================
-  # ORCHESTRATOR TRIGGER ONLY
-  # =========================
   repository_dispatch:
     types: [prod-deploy]
 
 jobs:
-# =========================================================
-# DEPLOY / ROLLBACK – ORCHESTRATED ONLY
-# =========================================================
   deploy:
     name: ${{ github.event.client_payload.operation == 'rollback' && 'Rollback' || 'Deploy' }} – ${{ github.event.client_payload.environment }}
-    runs-on: ubuntu-latest
-
     uses: vasunaidu-2/shared-workflows/.github/workflows/shared-deploy.yml@main
     with:
       service: ${{ github.event.repository.name }}
