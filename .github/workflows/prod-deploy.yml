@@ -1,6 +1,9 @@
-name: Prod Deploy
+name: Production Deployment
 
 on:
+  # =========================
+  # MANUAL TRIGGER
+  # =========================
   workflow_dispatch:
     inputs:
       tag:
@@ -13,23 +16,26 @@ on:
         required: true
         type: string
 
+  # =========================
+  # ORCHESTRATOR TRIGGER
+  # =========================
   repository_dispatch:
     types: [prod-deploy]
 
-# =========================================================
-# MANUAL RUN → APPROVAL REQUIRED
-# =========================================================
 jobs:
-  approval-manual:
+# =========================================================
+# MANUAL RUN → APPROVAL REQUIRED (OLD WORKING PATTERN)
+# =========================================================
+  approval:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    environment: manual-prod-approval
+    environment: ${{ inputs.environment }}
     steps:
-      - run: echo "Manual deployment approved"
+      - run: echo "Repo-level approval granted"
 
   deploy-manual:
     if: github.event_name == 'workflow_dispatch'
-    needs: approval-manual
+    needs: approval
     uses: vasunaidu-2/shared-workflows/.github/workflows/shared-deploy.yml@main
     with:
       service: ${{ github.event.repository.name }}
