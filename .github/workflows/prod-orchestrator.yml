@@ -71,6 +71,7 @@ jobs:
 # APPROVAL – PROD WEST
 # =========================================================
   approve-west:
+    if: inputs.environment != 'prod-east'
     needs: plan-west
     runs-on: ubuntu-latest
     environment: prod-west
@@ -81,6 +82,7 @@ jobs:
 # TRIGGER REPOS – PROD WEST
 # =========================================================
   trigger-west:
+    if: inputs.environment != 'prod-east'
     needs: [plan-west, approve-west]
     runs-on: ubuntu-latest
     steps:
@@ -171,6 +173,7 @@ jobs:
 # APPROVAL – PROD EAST
 # =========================================================
   approve-east:
+    if: inputs.environment == 'prod-east' || inputs.environment == 'prod-west-followed-by-prod-east'
     needs: plan-east
     runs-on: ubuntu-latest
     environment: prod-east
@@ -181,6 +184,7 @@ jobs:
 # TRIGGER REPOS – PROD EAST
 # =========================================================
   trigger-east:
+    if: inputs.environment == 'prod-east' || inputs.environment == 'prod-west-followed-by-prod-east'
     needs: [plan-east, approve-east]
     runs-on: ubuntu-latest
     steps:
