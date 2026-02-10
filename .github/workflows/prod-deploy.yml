@@ -67,7 +67,7 @@ jobs:
       region: ${{ inputs.region }}
 
 # =========================================================
-# ORCHESTRATOR RUN – NO APPROVAL
+# ORCHESTRATOR RUN – NO APPROVAL, NO REGION
 # =========================================================
   deploy-auto:
     if: github.event_name == 'repository_dispatch'
@@ -76,4 +76,3 @@ jobs:
       service: ${{ github.event.repository.name }}
       tag: ${{ github.event.client_payload.tag }}
       environment: ${{ github.event.client_payload.environment }}
-      region: ${{ github.event.client_payload.region }}
