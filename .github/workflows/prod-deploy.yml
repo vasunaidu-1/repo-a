@@ -1,87 +1,21 @@
 name: Production Deployment
-run-name: prod-${{ github.event.client_payload.operation || inputs.operation }}
+run-name: prod-${{ github.event.client_payload.operation }}
 
 on:
   # =========================
-  # MANUAL TRIGGER
-  # =========================
-  workflow_dispatch:
-    inputs:
-      tag:
-        required: true
-        type: string
-      environment:
-        required: true
-        type: choice
-        options:
-          - prod-west
-          - prod-east
-      operation:
-        required: true
-        type: choice
-        options:
-          - deployment
-          - rollback
-
-  # =========================
-  # ORCHESTRATOR TRIGGER
+  # ORCHESTRATOR TRIGGER ONLY
   # =========================
   repository_dispatch:
     types: [prod-deploy]
 
 jobs:
 # =========================================================
-# MANUAL – PROD WEST (APPROVAL)
+# DEPLOY / ROLLBACK – ORCHESTRATED ONLY
 # =========================================================
-  approval-prod-west:
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'prod-west'
-    name: Approval – prod-west
+  deploy:
+    name: ${{ github.event.client_payload.operation == 'rollback' && 'Rollback' || 'Deploy' }} – ${{ github.event.client_payload.environment }}
     runs-on: ubuntu-latest
-    environment: prod-west
-    steps:
-      - run: echo "Approved prod-west"
 
-  deploy-prod-west:
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'prod-west'
-    name: ${{ inputs.operation == 'rollback' && 'Rollback' || 'Deploy' }} – prod-west
-    needs: approval-prod-west
-    uses: vasunaidu-2/shared-workflows/.github/workflows/shared-deploy.yml@main
-    with:
-      service: ${{ github.event.repository.name }}
-      tag: ${{ inputs.tag }}
-      environment: prod-west
-      region: us-west-2
-      operation: ${{ inputs.operation }}
-
-# =========================================================
-# MANUAL – PROD EAST (APPROVAL)
-# =========================================================
-  approval-prod-east:
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'prod-east'
-    name: Approval – prod-east
-    runs-on: ubuntu-latest
-    environment: prod-east
-    steps:
-      - run: echo "Approved prod-east"
-
-  deploy-prod-east:
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'prod-east'
-    name: ${{ inputs.operation == 'rollback' && 'Rollback' || 'Deploy' }} – prod-east
-    needs: approval-prod-east
-    uses: vasunaidu-2/shared-workflows/.github/workflows/shared-deploy.yml@main
-    with:
-      service: ${{ github.event.repository.name }}
-      tag: ${{ inputs.tag }}
-      environment: prod-east
-      region: us-east-1
-      operation: ${{ inputs.operation }}
-
-# =========================================================
-# ORCHESTRATOR – NO APPROVAL
-# =========================================================
-  deploy-auto:
-    if: github.event_name == 'repository_dispatch'
-    name: ${{ github.event.client_payload.operation == 'rollback' && 'Rollback' || 'Deploy' }} – orchestrated
     uses: vasunaidu-2/shared-workflows/.github/workflows/shared-deploy.yml@main
     with:
       service: ${{ github.event.repository.name }}
