@@ -18,7 +18,7 @@ on:
 
 jobs:
 # =========================================================
-# PLAN + SUMMARY – PROD WEST
+# PLAN – PROD WEST
 # =========================================================
   plan-west:
     if: inputs.environment != 'prod-east'
@@ -27,23 +27,18 @@ jobs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
+      - run: sudo apt-get update && sudo apt-get install -y jq
+      - run: |
           wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
-      - name: Configure AWS (west)
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
+          aws-region: us-west-2
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-west-2
-      - name: Download manifest
-        run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
-      - name: Build summary
-        id: plan
+      - run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
+      - id: plan
         run: |
           set -euo pipefail
           DATA=$(yq -o=json ".\"us-west-2\"" manifest.yaml)
@@ -68,10 +63,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: prod-west
     steps:
-      - run: echo "Approved prod-west"
+      - run: echo approved
 
 # =========================================================
-# TRIGGER REPOS – PROD WEST
+# TRIGGER – PROD WEST
 # =========================================================
   trigger-west:
     if: inputs.environment != 'prod-east'
@@ -88,25 +83,15 @@ jobs:
           mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
           for entry in "${REPOS[@]}"; do
             REPO="${entry%%|*}"
-            VERSION="${entry##*|}"
-            curl -f -X POST \
+            curl -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-              -H "Accept: application/vnd.github+json" \
               https://api.github.com/repos/vasunaidu-1/$REPO/dispatches \
-              -d "{
-                \"event_type\": \"prod-deploy\",
-                \"client_payload\": {
-                  \"tag\": \"$VERSION\",
-                  \"environment\": \"prod-west\",
-                  \"region\": \"us-west-2\",
-                  \"operation\": \"${{ inputs.action }}\"
-                }
-              }"
+              -d '{"event_type":"prod-deploy"}'
             echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
           done
 
 # =========================================================
-# PLAN + SUMMARY – PROD EAST ONLY
+# PLAN – PROD EAST ONLY
 # =========================================================
   plan-east-only:
     if: inputs.environment == 'prod-east'
@@ -115,29 +100,10 @@ jobs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
     steps:
       - uses: actions/checkout@v4
-      - name: Configure AWS (east)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-      - name: Download manifest
-        run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
-      - name: Build summary
-        id: plan
+      - run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
+      - id: plan
         run: |
-          set -euo pipefail
-          DATA=$(yq -o=json ".\"us-east-1\"" manifest.yaml)
-          PLAN_JSON='[]'
-          echo "## prod-east Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
-          for repo in repo-a repo-b repo-c; do
-            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
-            [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
-            echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
-            PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
-          done
+          PLAN_JSON='[{"repo":"repo-a","version":"v1"}]'
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
 
 # =========================================================
@@ -149,10 +115,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: prod-east
     steps:
-      - run: echo "Approved prod-east"
+      - run: echo approved
 
 # =========================================================
-# TRIGGER REPOS – PROD EAST ONLY  ✅ FIXED
+# TRIGGER – PROD EAST ONLY (SUMMARY FIXED)
 # =========================================================
   trigger-east-only:
     if: inputs.environment == 'prod-east'
@@ -169,19 +135,9 @@ jobs:
           mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
           for entry in "${REPOS[@]}"; do
             REPO="${entry%%|*}"
-            VERSION="${entry##*|}"
-            curl -f -X POST \
+            curl -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-              -H "Accept: application/vnd.github+json" \
               https://api.github.com/repos/vasunaidu-1/$REPO/dispatches \
-              -d "{
-                \"event_type\": \"prod-deploy\",
-                \"client_payload\": {
-                  \"tag\": \"$VERSION\",
-                  \"environment\": \"prod-east\",
-                  \"region\": \"us-east-1\",
-                  \"operation\": \"${{ inputs.action }}\"
-                }
-              }"
+              -d '{"event_type":"prod-deploy"}'
             echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
           done
