@@ -15,9 +15,6 @@ on:
         options:
           - prod-west
           - prod-east
-      region:
-        required: true
-        type: string
 
   # =========================
   # ORCHESTRATOR TRIGGER
@@ -44,7 +41,7 @@ jobs:
       service: ${{ github.event.repository.name }}
       tag: ${{ inputs.tag }}
       environment: prod-west
-      region: ${{ inputs.region }}
+      region: us-west-2
 
 # =========================================================
 # MANUAL RUN – PROD EAST (APPROVAL REQUIRED)
@@ -64,10 +61,10 @@ jobs:
       service: ${{ github.event.repository.name }}
       tag: ${{ inputs.tag }}
       environment: prod-east
-      region: ${{ inputs.region }}
+      region: us-east-1
 
 # =========================================================
-# ORCHESTRATOR RUN – NO APPROVAL, NO REGION
+# ORCHESTRATOR RUN – NO APPROVAL
 # =========================================================
   deploy-auto:
     if: github.event_name == 'repository_dispatch'
