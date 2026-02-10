@@ -63,14 +63,3 @@ jobs:
       environment: prod-east
       region: us-east-1
 
-# =========================================================
-# ORCHESTRATOR RUN – NO APPROVAL (REGION DERIVED)
-# =========================================================
-  deploy-auto:
-    if: github.event_name == 'repository_dispatch'
-    uses: vasunaidu-2/shared-workflows/.github/workflows/shared-deploy.yml@main
-    with:
-      service: ${{ github.event.repository.name }}
-      tag: ${{ github.event.client_payload.tag }}
-      environment: ${{ github.event.client_payload.environment }}
-      region: ${{ github.event.client_payload.environment == 'prod-west' && 'us-west-2' || 'us-east-1' }}
