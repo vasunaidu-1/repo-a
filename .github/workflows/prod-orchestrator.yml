@@ -68,6 +68,7 @@ jobs:
 # APPROVAL – PROD WEST
 # =========================================================
   approve-west:
+    if: inputs.environment != 'prod-east'
     needs: plan-west
     runs-on: ubuntu-latest
     environment: prod-west
@@ -78,7 +79,8 @@ jobs:
 # TRIGGER REPOS – PROD WEST
 # =========================================================
   trigger-west:
-    needs: [plan-west, approve-west]
+    if: inputs.environment != 'prod-east'
+    needs: approve-west
     runs-on: ubuntu-latest
     steps:
       - name: Trigger repos (west)
@@ -109,7 +111,7 @@ jobs:
           done
 
 # =========================================================
-# PLAN + SUMMARY – PROD EAST (ONLY WHEN WEST → EAST)
+# PLAN + SUMMARY – PROD EAST (AFTER WEST)
 # =========================================================
   plan-east:
     if: inputs.environment == 'prod-west-followed-by-prod-east'
@@ -157,7 +159,7 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
 
 # =========================================================
-# PLAN + SUMMARY – PROD EAST (ONLY PROD EAST)
+# PLAN + SUMMARY – PROD EAST (ONLY EAST)
 # =========================================================
   plan-east-only:
     if: inputs.environment == 'prod-east'
@@ -204,20 +206,32 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
 
 # =========================================================
-# APPROVAL – PROD EAST
+# APPROVAL – PROD EAST (AFTER WEST)
 # =========================================================
   approve-east:
-    needs: [plan-east, plan-east-only]
+    if: inputs.environment == 'prod-west-followed-by-prod-east'
+    needs: plan-east
     runs-on: ubuntu-latest
     environment: prod-east
     steps:
-      - run: echo "Approved prod-east"
+      - run: echo "Approved prod-east (after west)"
+
+# =========================================================
+# APPROVAL – PROD EAST (ONLY EAST)
+# =========================================================
+  approve-east-only:
+    if: inputs.environment == 'prod-east'
+    needs: plan-east-only
+    runs-on: ubuntu-latest
+    environment: prod-east
+    steps:
+      - run: echo "Approved prod-east (only)"
 
 # =========================================================
 # TRIGGER REPOS – PROD EAST
 # =========================================================
   trigger-east:
-    needs: approve-east
+    needs: [approve-east, approve-east-only]
     runs-on: ubuntu-latest
     steps:
       - name: Trigger repos (east)
