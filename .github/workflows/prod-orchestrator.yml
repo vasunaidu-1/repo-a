@@ -79,7 +79,7 @@ jobs:
       - run: echo "Approved prod-west"
 
 # =========================================================
-# TRIGGER REPOS – PROD WEST (FIXED LOOP)
+# TRIGGER REPOS – PROD WEST (BULLETPROOF)
 # =========================================================
   trigger-west:
     needs: approve-west
@@ -94,9 +94,9 @@ jobs:
           echo "| Repo | Workflow |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|----------|" >> "$GITHUB_STEP_SUMMARY"
 
-          REPOS=$(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
+          mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
 
-          for entry in $REPOS; do
+          for entry in "${REPOS[@]}"; do
             REPO="${entry%%|*}"
             VERSION="${entry##*|}"
 
@@ -179,7 +179,7 @@ jobs:
       - run: echo "Approved prod-east"
 
 # =========================================================
-# TRIGGER REPOS – PROD EAST (FIXED LOOP)
+# TRIGGER REPOS – PROD EAST (BULLETPROOF)
 # =========================================================
   trigger-east:
     needs: approve-east
@@ -194,9 +194,9 @@ jobs:
           echo "| Repo | Workflow |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|----------|" >> "$GITHUB_STEP_SUMMARY"
 
-          REPOS=$(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
+          mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
 
-          for entry in $REPOS; do
+          for entry in "${REPOS[@]}"; do
             REPO="${entry%%|*}"
             VERSION="${entry##*|}"
 
