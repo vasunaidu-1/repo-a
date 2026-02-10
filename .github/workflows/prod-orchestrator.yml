@@ -45,10 +45,9 @@ jobs:
           aws-region: us-west-2
 
       - name: Download manifest
-        run: |
-          aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
+        run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
-      - name: Build summary (west)
+      - name: Build summary
         id: plan
         run: |
           set -euo pipefail
@@ -56,8 +55,8 @@ jobs:
           PLAN_JSON='[]'
 
           echo "## prod-west Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Repository | Version |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|------------|---------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
 
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
@@ -79,10 +78,10 @@ jobs:
       - run: echo "Approved prod-west"
 
 # =========================================================
-# TRIGGER REPOS – PROD WEST (BULLETPROOF)
+# TRIGGER REPOS – PROD WEST (FIXED)
 # =========================================================
   trigger-west:
-    needs: approve-west
+    needs: [plan-west, approve-west]   # 🔥 FIX IS HERE
     runs-on: ubuntu-latest
     steps:
       - name: Trigger repos (west)
@@ -145,10 +144,9 @@ jobs:
           aws-region: us-east-1
 
       - name: Download manifest
-        run: |
-          aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
+        run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
 
-      - name: Build summary (east)
+      - name: Build summary
         id: plan
         run: |
           set -euo pipefail
@@ -156,8 +154,8 @@ jobs:
           PLAN_JSON='[]'
 
           echo "## prod-east Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Repository | Version |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|------------|---------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
 
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
@@ -179,10 +177,10 @@ jobs:
       - run: echo "Approved prod-east"
 
 # =========================================================
-# TRIGGER REPOS – PROD EAST (BULLETPROOF)
+# TRIGGER REPOS – PROD EAST (FIXED)
 # =========================================================
   trigger-east:
-    needs: approve-east
+    needs: [plan-east, approve-east]   # 🔥 FIX IS HERE
     runs-on: ubuntu-latest
     steps:
       - name: Trigger repos (east)
