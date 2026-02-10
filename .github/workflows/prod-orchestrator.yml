@@ -120,8 +120,8 @@ jobs:
 # PLAN + SUMMARY – PROD EAST
 # =========================================================
   plan-east:
-    if: inputs.environment != 'prod-west'
-    needs: trigger-west
+    if: inputs.environment == 'prod-east' || inputs.environment == 'prod-west-followed-by-prod-east'
+    needs: [plan-west, trigger-west]
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
