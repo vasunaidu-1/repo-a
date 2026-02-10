@@ -1,9 +1,6 @@
-name: Production Deployment
+name: Prod Deploy
 
 on:
-  # =========================
-  # MANUAL TRIGGER
-  # =========================
   workflow_dispatch:
     inputs:
       tag:
@@ -11,55 +8,43 @@ on:
         type: string
       environment:
         required: true
-        type: choice
-        options:
-          - prod-west
-          - prod-east
+        type: string
+      region:
+        required: true
+        type: string
 
-  # =========================
-  # ORCHESTRATOR TRIGGER
-  # =========================
   repository_dispatch:
     types: [prod-deploy]
 
+# =========================================================
+# MANUAL RUN → APPROVAL REQUIRED
+# =========================================================
 jobs:
-# =========================================================
-# MANUAL RUN – PROD WEST (APPROVAL REQUIRED)
-# =========================================================
-  approval-prod-west:
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'prod-west'
+  approval-manual:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    environment: prod-west
+    environment: manual-prod-approval
     steps:
-      - run: echo "Approved prod-west"
+      - run: echo "Manual deployment approved"
 
-  deploy-prod-west:
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'prod-west'
-    needs: approval-prod-west
+  deploy-manual:
+    if: github.event_name == 'workflow_dispatch'
+    needs: approval-manual
     uses: vasunaidu-2/shared-workflows/.github/workflows/shared-deploy.yml@main
     with:
       service: ${{ github.event.repository.name }}
       tag: ${{ inputs.tag }}
-      environment: prod-west
-      region: us-west-2
+      environment: ${{ inputs.environment }}
+      region: ${{ inputs.region }}
 
 # =========================================================
-# MANUAL RUN – PROD EAST (APPROVAL REQUIRED)
+# ORCHESTRATOR RUN → NO APPROVAL
 # =========================================================
-  approval-prod-east:
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'prod-east'
-    runs-on: ubuntu-latest
-    environment: prod-east
-    steps:
-      - run: echo "Approved prod-east"
-
-  deploy-prod-east:
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'prod-east'
-    needs: approval-prod-east
+  deploy-auto:
+    if: github.event_name == 'repository_dispatch'
     uses: vasunaidu-2/shared-workflows/.github/workflows/shared-deploy.yml@main
     with:
       service: ${{ github.event.repository.name }}
-      tag: ${{ inputs.tag }}
-      environment: prod-east
-      region: us-east-1
-
+      tag: ${{ github.event.client_payload.tag }}
+      environment: ${{ github.event.client_payload.environment }}
+      region: ${{ github.event.client_payload.region }}
