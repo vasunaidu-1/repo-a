@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -68,7 +69,6 @@ jobs:
 # =========================================================
   approve-west:
     needs: plan-west
-    if: inputs.environment != 'prod-east'
     runs-on: ubuntu-latest
     environment: prod-west
     steps:
@@ -79,7 +79,6 @@ jobs:
 # =========================================================
   trigger-west:
     needs: [plan-west, approve-west]
-    if: inputs.environment != 'prod-east'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger repos (west)
@@ -110,14 +109,15 @@ jobs:
           done
 
 # =========================================================
-# PLAN & SUMMARY – PROD EAST
+# PLAN & SUMMARY – PROD EAST (FIXED)
 # =========================================================
   plan-east:
     if: inputs.environment != 'prod-west'
-    needs: trigger-west
+    needs: ${{ inputs.environment == 'prod-west-followed-by-prod-east' && 'trigger-west' || '' }}
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -129,7 +129,6 @@ jobs:
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
 
-      # 🔑 THIS WAS MISSING BEFORE
       - name: Configure AWS (east)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -162,7 +161,6 @@ jobs:
 # =========================================================
   approve-east:
     needs: plan-east
-    if: inputs.environment != 'prod-west'
     runs-on: ubuntu-latest
     environment: prod-east
     steps:
@@ -173,7 +171,6 @@ jobs:
 # =========================================================
   trigger-east:
     needs: [plan-east, approve-east]
-    if: inputs.environment != 'prod-west'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger repos (east)
