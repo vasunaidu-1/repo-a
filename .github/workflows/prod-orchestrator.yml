@@ -16,10 +16,10 @@ on:
           - prod-west-followed-by-prod-east
         default: prod-west
 
+jobs:
 # =========================================================
 # ORCHESTRATE – PROD WEST
 # =========================================================
-jobs:
   orchestrate-west:
     if: inputs.environment != 'prod-east'
     runs-on: ubuntu-latest
@@ -55,8 +55,8 @@ jobs:
           PLAN_JSON='[]'
 
           echo "## prod-west Build & Release Plan" >> $GITHUB_STEP_SUMMARY
-          echo "| Repository | Version |" >> $GITHUB_STEP_SUMMARY
-          echo "|------------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Repo | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
 
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
@@ -68,20 +68,10 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> $GITHUB_OUTPUT
 
 # =========================================================
-# APPROVAL – PROD WEST
-# =========================================================
-  approval-west:
-    needs: orchestrate-west
-    runs-on: ubuntu-latest
-    environment: prod-west
-    steps:
-      - run: echo "Approved prod-west"
-
-# =========================================================
-# TRIGGERS – PROD WEST
+# TRIGGER – PROD WEST (repository_dispatch)
 # =========================================================
   trigger-repos-west:
-    needs: [orchestrate-west, approval-west]
+    needs: orchestrate-west
     runs-on: ubuntu-latest
     steps:
       - name: Trigger repos (prod-west)
@@ -90,8 +80,8 @@ jobs:
           PLAN_JSON=$(echo "${{ needs.orchestrate-west.outputs.plan_b64 }}" | base64 -d)
 
           echo "## prod-west Repositories Triggered" >> $GITHUB_STEP_SUMMARY
-          echo "| Repository | Workflow |" >> $GITHUB_STEP_SUMMARY
-          echo "|------------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Repo | Workflow |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|----------|" >> $GITHUB_STEP_SUMMARY
 
           echo "$PLAN_JSON" | jq -c '.[]' | while read -r item; do
             REPO=$(echo "$item" | jq -r '.repo')
@@ -100,10 +90,17 @@ jobs:
             curl -f -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
               -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/vasunaidu-1/$REPO/actions/workflows/prod-deploy.yml/dispatches \
-              -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"prod-west\",\"region\":\"us-west-2\"}}"
+              https://api.github.com/repos/vasunaidu-1/$REPO/dispatches \
+              -d "{
+                \"event_type\": \"prod-deploy\",
+                \"client_payload\": {
+                  \"tag\": \"$VERSION\",
+                  \"environment\": \"prod-west\",
+                  \"region\": \"us-west-2\"
+                }
+              }"
 
-            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions/workflows/prod-deploy.yml |" >> $GITHUB_STEP_SUMMARY
+            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> $GITHUB_STEP_SUMMARY
           done
 
 # =========================================================
@@ -139,13 +136,12 @@ jobs:
       - name: Build plan (east)
         id: plan
         run: |
-          set -euo pipefail
           DATA=$(yq -o=json ".\"us-east-1\"" manifest.yaml)
           PLAN_JSON='[]'
 
           echo "## prod-east Build & Release Plan" >> $GITHUB_STEP_SUMMARY
-          echo "| Repository | Version |" >> $GITHUB_STEP_SUMMARY
-          echo "|------------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Repo | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
 
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
@@ -157,30 +153,19 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> $GITHUB_OUTPUT
 
 # =========================================================
-# APPROVAL – PROD EAST (DIRECT)
-# =========================================================
-  approval-east-direct:
-    needs: orchestrate-east-direct
-    runs-on: ubuntu-latest
-    environment: prod-east
-    steps:
-      - run: echo "Approved prod-east"
-
-# =========================================================
-# TRIGGERS – PROD EAST (DIRECT)
+# TRIGGER – PROD EAST (DIRECT)
 # =========================================================
   trigger-repos-east-direct:
-    needs: [orchestrate-east-direct, approval-east-direct]
+    needs: orchestrate-east-direct
     runs-on: ubuntu-latest
     steps:
       - name: Trigger repos (prod-east)
         run: |
-          set -euo pipefail
           PLAN_JSON=$(echo "${{ needs.orchestrate-east-direct.outputs.plan_b64 }}" | base64 -d)
 
           echo "## prod-east Repositories Triggered" >> $GITHUB_STEP_SUMMARY
-          echo "| Repository | Workflow |" >> $GITHUB_STEP_SUMMARY
-          echo "|------------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Repo | Workflow |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|----------|" >> $GITHUB_STEP_SUMMARY
 
           echo "$PLAN_JSON" | jq -c '.[]' | while read -r item; do
             REPO=$(echo "$item" | jq -r '.repo')
@@ -189,10 +174,17 @@ jobs:
             curl -f -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
               -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/vasunaidu-1/$REPO/actions/workflows/prod-deploy.yml/dispatches \
-              -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"prod-east\",\"region\":\"us-east-1\"}}"
+              https://api.github.com/repos/vasunaidu-1/$REPO/dispatches \
+              -d "{
+                \"event_type\": \"prod-deploy\",
+                \"client_payload\": {
+                  \"tag\": \"$VERSION\",
+                  \"environment\": \"prod-east\",
+                  \"region\": \"us-east-1\"
+                }
+              }"
 
-            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions/workflows/prod-deploy.yml |" >> $GITHUB_STEP_SUMMARY
+            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> $GITHUB_STEP_SUMMARY
           done
 
 # =========================================================
@@ -221,13 +213,12 @@ jobs:
       - name: Build plan (east)
         id: plan
         run: |
-          set -euo pipefail
           DATA=$(yq -o=json ".\"us-east-1\"" manifest.yaml)
           PLAN_JSON='[]'
 
           echo "## prod-east Build & Release Plan" >> $GITHUB_STEP_SUMMARY
-          echo "| Repository | Version |" >> $GITHUB_STEP_SUMMARY
-          echo "|------------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Repo | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
 
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
@@ -239,30 +230,19 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> $GITHUB_OUTPUT
 
 # =========================================================
-# APPROVAL – PROD EAST (AFTER WEST)
-# =========================================================
-  approval-east-after-west:
-    needs: orchestrate-east-after-west
-    runs-on: ubuntu-latest
-    environment: prod-east
-    steps:
-      - run: echo "Approved prod-east"
-
-# =========================================================
-# TRIGGERS – PROD EAST (AFTER WEST)
+# TRIGGER – PROD EAST (AFTER WEST)
 # =========================================================
   trigger-repos-east-after-west:
-    needs: [orchestrate-east-after-west, approval-east-after-west]
+    needs: orchestrate-east-after-west
     runs-on: ubuntu-latest
     steps:
       - name: Trigger repos (prod-east)
         run: |
-          set -euo pipefail
           PLAN_JSON=$(echo "${{ needs.orchestrate-east-after-west.outputs.plan_b64 }}" | base64 -d)
 
           echo "## prod-east Repositories Triggered" >> $GITHUB_STEP_SUMMARY
-          echo "| Repository | Workflow |" >> $GITHUB_STEP_SUMMARY
-          echo "|------------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Repo | Workflow |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|----------|" >> $GITHUB_STEP_SUMMARY
 
           echo "$PLAN_JSON" | jq -c '.[]' | while read -r item; do
             REPO=$(echo "$item" | jq -r '.repo')
@@ -271,8 +251,15 @@ jobs:
             curl -f -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
               -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/vasunaidu-1/$REPO/actions/workflows/prod-deploy.yml/dispatches \
-              -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$VERSION\",\"environment\":\"prod-east\",\"region\":\"us-east-1\"}}"
+              https://api.github.com/repos/vasunaidu-1/$REPO/dispatches \
+              -d "{
+                \"event_type\": \"prod-deploy\",
+                \"client_payload\": {
+                  \"tag\": \"$VERSION\",
+                  \"environment\": \"prod-east\",
+                  \"region\": \"us-east-1\"
+                }
+              }"
 
-            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions/workflows/prod-deploy.yml |" >> $GITHUB_STEP_SUMMARY
+            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> $GITHUB_STEP_SUMMARY
           done
