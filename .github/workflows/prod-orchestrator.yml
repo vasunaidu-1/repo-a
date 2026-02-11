@@ -16,14 +16,13 @@ on:
           - prod-west-followed-by-prod-east
         default: prod-west
 
-jobs:
-
 ###########################################################
 # ===================== PROD WEST ========================
 ###########################################################
+jobs:
 
   plan-west:
-    if: ${{ inputs.environment == 'prod-west' || inputs.environment == 'prod-west-followed-by-prod-east' }}
+    if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west-followed-by-prod-east'
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
@@ -54,6 +53,7 @@ jobs:
           set -euo pipefail
           DATA=$(yq -o=json ".\"us-west-2\"" manifest.yaml)
           PLAN_JSON='[]'
+
           echo "## prod-west Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
@@ -68,7 +68,7 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
 
   approve-west:
-    if: ${{ inputs.environment == 'prod-west' || inputs.environment == 'prod-west-followed-by-prod-east' }}
+    if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west-followed-by-prod-east'
     needs: plan-west
     runs-on: ubuntu-latest
     environment: prod-west
@@ -76,7 +76,7 @@ jobs:
       - run: echo "Approved prod-west"
 
   trigger-west:
-    if: ${{ inputs.environment == 'prod-west' || inputs.environment == 'prod-west-followed-by-prod-east' }}
+    if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west-followed-by-prod-east'
     needs: [plan-west, approve-west]
     runs-on: ubuntu-latest
     steps:
@@ -117,7 +117,7 @@ jobs:
 ###########################################################
 
   plan-east:
-    if: ${{ inputs.environment == 'prod-east' }}
+    if: inputs.environment == 'prod-east'
     runs-on: ubuntu-latest
     outputs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
@@ -148,6 +148,7 @@ jobs:
           set -euo pipefail
           DATA=$(yq -o=json ".\"us-east-1\"" manifest.yaml)
           PLAN_JSON='[]'
+
           echo "## prod-east Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
@@ -162,7 +163,7 @@ jobs:
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
 
   approve-east:
-    if: ${{ inputs.environment == 'prod-east' }}
+    if: inputs.environment == 'prod-east'
     needs: plan-east
     runs-on: ubuntu-latest
     environment: prod-east
@@ -170,7 +171,7 @@ jobs:
       - run: echo "Approved prod-east"
 
   trigger-east:
-    if: ${{ inputs.environment == 'prod-east' }}
+    if: inputs.environment == 'prod-east'
     needs: [plan-east, approve-east]
     runs-on: ubuntu-latest
     steps:
@@ -204,4 +205,84 @@ jobs:
               }"
 
             echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+###########################################################
+# ========== PROD WEST → PROD EAST ========================
+###########################################################
+
+  plan-east-after-west:
+    if: inputs.environment == 'prod-west-followed-by-prod-east'
+    needs: trigger-west
+    runs-on: ubuntu-latest
+    outputs:
+      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS (east)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Download manifest
+        run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
+      - name: Build summary
+        id: plan
+        run: |
+          set -euo pipefail
+          DATA=$(yq -o=json ".\"us-east-1\"" manifest.yaml)
+          PLAN_JSON='[]'
+
+          echo "## prod-east Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
+
+          for repo in repo-a repo-b repo-c; do
+            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
+            [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
+            echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
+            PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
+          done
+
+          echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+  approve-east-after-west:
+    if: inputs.environment == 'prod-west-followed-by-prod-east'
+    needs: plan-east-after-west
+    runs-on: ubuntu-latest
+    environment: prod-east
+    steps:
+      - run: echo "Approved prod-east"
+
+  trigger-east-after-west:
+    if: inputs.environment == 'prod-west-followed-by-prod-east'
+    needs: [plan-east-after-west, approve-east-after-west]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger repos (east)
+        run: |
+          set -euo pipefail
+          PLAN=$(echo "${{ needs.plan-east-after-west.outputs.plan_b64 }}" | base64 -d)
+
+          mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
+
+          for entry in "${REPOS[@]}"; do
+            REPO="${entry%%|*}"
+            VERSION="${entry##*|}"
+
+            curl -f -X POST \
+              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/vasunaidu-1/$REPO/dispatches \
+              -d "{
+                \"event_type\": \"prod-deploy\",
+                \"client_payload\": {
+                  \"tag\": \"$VERSION\",
+                  \"environment\": \"prod-east\",
+                  \"region\": \"us-east-1\",
+                  \"operation\": \"${{ inputs.action }}\",
+                  \"sequence\": \"west-followed-by-east\"
+                }
+              }"
           done
