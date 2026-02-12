@@ -85,7 +85,7 @@ jobs:
           set -euo pipefail
           PLAN=$(echo "${{ needs.plan-west.outputs.plan_b64 }}" | base64 -d)
 
-          echo "## prod-west Repositories Triggered (Parallel)" >> "$GITHUB_STEP_SUMMARY"
+          echo "## prod-west Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Workflow |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|----------|" >> "$GITHUB_STEP_SUMMARY"
 
@@ -108,7 +108,7 @@ jobs:
                 }
               }"
 
-            echo "| [$REPO](https://github.com/vasunaidu-1/$REPO/actions) | Triggered |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
           done
 
 ###########################################################
@@ -178,9 +178,9 @@ jobs:
           set -euo pipefail
           PLAN=$(echo "${{ needs.plan-east.outputs.plan_b64 }}" | base64 -d)
 
-          echo "## prod-east Repositories Triggered (Sequential)" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Repo | Status |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "## prod-east Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Workflow |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|----------|" >> "$GITHUB_STEP_SUMMARY"
 
           mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
 
@@ -188,8 +188,7 @@ jobs:
             REPO="${entry%%|*}"
             VERSION="${entry##*|}"
 
-            echo "Starting $REPO..."
-            START_TIME=$(date)
+            echo "Triggering $REPO..."
 
             curl -f -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
@@ -205,18 +204,24 @@ jobs:
                 }
               }"
 
+            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
+
+            echo "Waiting for $REPO deployment to complete..."
+
             while true; do
               STATUS=$(curl -s \
                 -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-                https://api.github.com/repos/vasunaidu-1/$REPO/actions/runs?per_page=1 \
+                "https://api.github.com/repos/vasunaidu-1/$REPO/actions/runs?event=repository_dispatch&per_page=1" \
                 | jq -r '.workflow_runs[0].status')
 
-              [[ "$STATUS" == "completed" ]] && break
+              if [[ "$STATUS" == "completed" ]]; then
+                break
+              fi
+
               sleep 20
             done
 
-            echo "| [$REPO](https://github.com/vasunaidu-1/$REPO/actions) | Completed |" >> "$GITHUB_STEP_SUMMARY"
-            echo "$REPO finished at $(date)"
+            echo "$REPO completed."
           done
 
 ###########################################################
@@ -282,14 +287,14 @@ jobs:
     needs: [plan-east-after-west, approve-east-after-west]
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger repos (east sequential after west)
+      - name: Trigger repos (east - sequential)
         run: |
           set -euo pipefail
           PLAN=$(echo "${{ needs.plan-east-after-west.outputs.plan_b64 }}" | base64 -d)
 
-          echo "## prod-east Repositories Triggered (Sequential)" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Repo | Status |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "## prod-east Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Workflow |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|----------|" >> "$GITHUB_STEP_SUMMARY"
 
           mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
 
@@ -297,7 +302,7 @@ jobs:
             REPO="${entry%%|*}"
             VERSION="${entry##*|}"
 
-            echo "Starting $REPO..."
+            echo "Triggering $REPO..."
 
             curl -f -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
@@ -313,16 +318,22 @@ jobs:
                 }
               }"
 
+            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
+
+            echo "Waiting for $REPO deployment to complete..."
+
             while true; do
               STATUS=$(curl -s \
                 -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
-                https://api.github.com/repos/vasunaidu-1/$REPO/actions/runs?per_page=1 \
+                "https://api.github.com/repos/vasunaidu-1/$REPO/actions/runs?event=repository_dispatch&per_page=1" \
                 | jq -r '.workflow_runs[0].status')
 
-              [[ "$STATUS" == "completed" ]] && break
+              if [[ "$STATUS" == "completed" ]]; then
+                break
+              fi
+
               sleep 20
             done
 
-            echo "| [$REPO](https://github.com/vasunaidu-1/$REPO/actions) | Completed |" >> "$GITHUB_STEP_SUMMARY"
-            echo "$REPO finished at $(date)"
+            echo "$REPO completed."
           done
