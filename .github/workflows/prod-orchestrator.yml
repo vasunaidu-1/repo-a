@@ -16,10 +16,11 @@ on:
           - prod-west-followed-by-prod-east
         default: prod-west
 
+jobs:
+
 ###########################################################
 # ===================== PROD WEST ========================
 ###########################################################
-jobs:
 
   plan-west:
     if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west-followed-by-prod-east'
@@ -28,7 +29,6 @@ jobs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Install tools
         run: |
           sudo apt-get update
@@ -36,35 +36,29 @@ jobs:
           wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
-
       - name: Configure AWS (west)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-west-2
-
       - name: Download manifest
         run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
-
       - name: Build summary
         id: plan
         run: |
           set -euo pipefail
           DATA=$(yq -o=json ".\"us-west-2\"" manifest.yaml)
           PLAN_JSON='[]'
-
           echo "## prod-west Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
-
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
             [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
             echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
             PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
           done
-
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
 
   approve-west:
@@ -84,16 +78,13 @@ jobs:
         run: |
           set -euo pipefail
           PLAN=$(echo "${{ needs.plan-west.outputs.plan_b64 }}" | base64 -d)
-
           echo "## prod-west Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Workflow |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|----------|" >> "$GITHUB_STEP_SUMMARY"
-
           mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
           for entry in "${REPOS[@]}"; do
             REPO="${entry%%|*}"
             VERSION="${entry##*|}"
-
             curl -f -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
               -H "Accept: application/vnd.github+json" \
@@ -107,7 +98,6 @@ jobs:
                   \"operation\": \"${{ inputs.action }}\"
                 }
               }"
-
             echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
           done
 
@@ -122,7 +112,6 @@ jobs:
       plan_b64: ${{ steps.plan.outputs.plan_b64 }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Install tools
         run: |
           sudo apt-get update
@@ -130,35 +119,29 @@ jobs:
           wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           chmod +x yq_linux_amd64
           sudo mv yq_linux_amd64 /usr/local/bin/yq
-
       - name: Configure AWS (east)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-
       - name: Download manifest
         run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
-
       - name: Build summary
         id: plan
         run: |
           set -euo pipefail
           DATA=$(yq -o=json ".\"us-east-1\"" manifest.yaml)
           PLAN_JSON='[]'
-
           echo "## prod-east Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
-
           for repo in repo-a repo-b repo-c; do
             VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
             [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
             echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
             PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
           done
-
           echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
 
   approve-east:
@@ -174,23 +157,18 @@ jobs:
     needs: [plan-east, approve-east]
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger repos (east sequential with proof)
+      - name: Trigger repos (east sequential proof)
         run: |
           set -euo pipefail
           PLAN=$(echo "${{ needs.plan-east.outputs.plan_b64 }}" | base64 -d)
-
           echo "## prod-east Sequential Deployment Proof" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Repo | Triggered At (UTC) | Completed At (UTC) | Workflow |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|------|-------------------|--------------------|----------|" >> "$GITHUB_STEP_SUMMARY"
-
+          echo "| Repo | Triggered (UTC) | Completed (UTC) | Workflow |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|-----------------|-----------------|----------|" >> "$GITHUB_STEP_SUMMARY"
           mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
-
           for entry in "${REPOS[@]}"; do
             REPO="${entry%%|*}"
             VERSION="${entry##*|}"
-
             START_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
-
             curl -s -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
               -H "Accept: application/vnd.github+json" \
@@ -204,25 +182,114 @@ jobs:
                   \"operation\": \"${{ inputs.action }}\"
                 }
               }"
-
             sleep 8
-
             RUN_ID=$(curl -s \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
               "https://api.github.com/repos/vasunaidu-1/$REPO/actions/runs?event=repository_dispatch&per_page=1" \
               | jq -r '.workflow_runs[0].id')
-
             while true; do
               STATUS=$(curl -s \
                 -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
                 https://api.github.com/repos/vasunaidu-1/$REPO/actions/runs/$RUN_ID \
                 | jq -r '.status')
-
               [[ "$STATUS" == "completed" ]] && break
               sleep 20
             done
-
             END_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
+            echo "| $REPO | $START_TIME | $END_TIME | https://github.com/vasunaidu-1/$REPO/actions/runs/$RUN_ID |" >> "$GITHUB_STEP_SUMMARY"
+          done
 
+###########################################################
+# ========== PROD WEST → PROD EAST ========================
+###########################################################
+
+  plan-east-after-west:
+    if: inputs.environment == 'prod-west-followed-by-prod-east'
+    needs: trigger-west
+    runs-on: ubuntu-latest
+    outputs:
+      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x yq_linux_amd64
+          sudo mv yq_linux_amd64 /usr/local/bin/yq
+      - name: Configure AWS (east)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Download manifest
+        run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
+      - name: Build summary
+        id: plan
+        run: |
+          set -euo pipefail
+          DATA=$(yq -o=json ".\"us-east-1\"" manifest.yaml)
+          PLAN_JSON='[]'
+          for repo in repo-a repo-b repo-c; do
+            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
+            [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
+            PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
+          done
+          echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+  approve-east-after-west:
+    if: inputs.environment == 'prod-west-followed-by-prod-east'
+    needs: plan-east-after-west
+    runs-on: ubuntu-latest
+    environment: prod-east
+    steps:
+      - run: echo "Approved prod-east"
+
+  trigger-east-after-west:
+    if: inputs.environment == 'prod-west-followed-by-prod-east'
+    needs: [plan-east-after-west, approve-east-after-west]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger repos (east sequential proof)
+        run: |
+          set -euo pipefail
+          PLAN=$(echo "${{ needs.plan-east-after-west.outputs.plan_b64 }}" | base64 -d)
+          echo "## prod-east Sequential Deployment Proof" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Triggered (UTC) | Completed (UTC) | Workflow |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|-----------------|-----------------|----------|" >> "$GITHUB_STEP_SUMMARY"
+          mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
+          for entry in "${REPOS[@]}"; do
+            REPO="${entry%%|*}"
+            VERSION="${entry##*|}"
+            START_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
+            curl -s -X POST \
+              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/vasunaidu-1/$REPO/dispatches \
+              -d "{
+                \"event_type\": \"prod-deploy\",
+                \"client_payload\": {
+                  \"tag\": \"$VERSION\",
+                  \"environment\": \"prod-east\",
+                  \"region\": \"us-east-1\",
+                  \"operation\": \"${{ inputs.action }}\"
+                }
+              }"
+            sleep 8
+            RUN_ID=$(curl -s \
+              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+              "https://api.github.com/repos/vasunaidu-1/$REPO/actions/runs?event=repository_dispatch&per_page=1" \
+              | jq -r '.workflow_runs[0].id')
+            while true; do
+              STATUS=$(curl -s \
+                -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+                https://api.github.com/repos/vasunaidu-1/$REPO/actions/runs/$RUN_ID \
+                | jq -r '.status')
+              [[ "$STATUS" == "completed" ]] && break
+              sleep 20
+            done
+            END_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
             echo "| $REPO | $START_TIME | $END_TIME | https://github.com/vasunaidu-1/$REPO/actions/runs/$RUN_ID |" >> "$GITHUB_STEP_SUMMARY"
           done
