@@ -108,7 +108,7 @@ jobs:
                 }
               }"
 
-            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| [$REPO](https://github.com/vasunaidu-1/$REPO/actions) | Triggered |" >> "$GITHUB_STEP_SUMMARY"
           done
 
 ###########################################################
@@ -188,6 +188,9 @@ jobs:
             REPO="${entry%%|*}"
             VERSION="${entry##*|}"
 
+            echo "Starting $REPO..."
+            START_TIME=$(date)
+
             curl -f -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
               -H "Accept: application/vnd.github+json" \
@@ -202,8 +205,6 @@ jobs:
                 }
               }"
 
-            echo "Waiting for $REPO to complete..."
-
             while true; do
               STATUS=$(curl -s \
                 -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
@@ -214,7 +215,8 @@ jobs:
               sleep 20
             done
 
-            echo "| $REPO | Completed |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| [$REPO](https://github.com/vasunaidu-1/$REPO/actions) | Completed |" >> "$GITHUB_STEP_SUMMARY"
+            echo "$REPO finished at $(date)"
           done
 
 ###########################################################
@@ -295,6 +297,8 @@ jobs:
             REPO="${entry%%|*}"
             VERSION="${entry##*|}"
 
+            echo "Starting $REPO..."
+
             curl -f -X POST \
               -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
               -H "Accept: application/vnd.github+json" \
@@ -309,8 +313,6 @@ jobs:
                 }
               }"
 
-            echo "Waiting for $REPO to complete..."
-
             while true; do
               STATUS=$(curl -s \
                 -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
@@ -321,5 +323,6 @@ jobs:
               sleep 20
             done
 
-            echo "| $REPO | Completed |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| [$REPO](https://github.com/vasunaidu-1/$REPO/actions) | Completed |" >> "$GITHUB_STEP_SUMMARY"
+            echo "$REPO finished at $(date)"
           done
