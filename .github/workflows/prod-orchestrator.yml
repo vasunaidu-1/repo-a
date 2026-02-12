@@ -1,117 +1,298 @@
-name: Production Deployment
-run-name: prod-${{ github.event.client_payload.operation || inputs.operation }}
+name: Prod Orchestrator
+run-name: prod-orchestrator-${{ inputs.action }}
 
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        required: true
-        type: string
+      action:
+        type: choice
+        options: [deployment, rollback]
+        default: deployment
       environment:
-        required: true
         type: choice
         options:
           - prod-west
           - prod-east
-      operation:
-        required: true
-        type: choice
-        options:
-          - deployment
-          - rollback
+          - prod-west-followed-by-prod-east
+        default: prod-west
 
-  repository_dispatch:
-    types: [prod-deploy]
-
+###########################################################
+# ===================== PROD WEST ========================
+###########################################################
 jobs:
+  plan-west:
+    if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west-followed-by-prod-east'
+    runs-on: ubuntu-latest
+    outputs:
+      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
+    steps:
+      - uses: actions/checkout@v4
 
-###########################################################
-# ================= MANUAL – PROD WEST ===================
-###########################################################
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x yq_linux_amd64
+          sudo mv yq_linux_amd64 /usr/local/bin/yq
 
-  approval-prod-west:
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'prod-west'
-    name: Approval – prod-west
+      - name: Configure AWS (west)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Download manifest
+        run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
+
+      - name: Build summary
+        id: plan
+        run: |
+          set -euo pipefail
+          DATA=$(yq -o=json ".\"us-west-2\"" manifest.yaml)
+          PLAN_JSON='[]'
+
+          echo "## prod-west Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
+
+          for repo in repo-a repo-b repo-c; do
+            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
+            [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
+            echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
+            PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
+          done
+
+          echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+  approve-west:
+    if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west-followed-by-prod-east'
+    needs: plan-west
     runs-on: ubuntu-latest
     environment: prod-west
     steps:
       - run: echo "Approved prod-west"
 
-  deploy-prod-west:
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'prod-west'
-    name: ${{ inputs.operation == 'rollback' && 'Rollback' || 'Deploy' }} – prod-west
-    needs: approval-prod-west
-    uses: vasunaidu-2/shared-workflows/.github/workflows/shared-deploy.yml@main
-    with:
-      service: ${{ github.event.repository.name }}
-      tag: ${{ inputs.tag }}
-      environment: prod-west
-      region: us-west-2
-      operation: ${{ inputs.operation }}
+  trigger-west:
+    if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west-followed-by-prod-east'
+    needs: [plan-west, approve-west]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger repos (west)
+        run: |
+          set -euo pipefail
+          PLAN=$(echo "${{ needs.plan-west.outputs.plan_b64 }}" | base64 -d)
+
+          echo "## prod-west Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Workflow |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|----------|" >> "$GITHUB_STEP_SUMMARY"
+
+          mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
+          for entry in "${REPOS[@]}"; do
+            REPO="${entry%%|*}"
+            VERSION="${entry##*|}"
+
+            curl -f -X POST \
+              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/vasunaidu-1/$REPO/dispatches \
+              -d "{
+                \"event_type\": \"prod-deploy\",
+                \"client_payload\": {
+                  \"tag\": \"$VERSION\",
+                  \"environment\": \"prod-west\",
+                  \"region\": \"us-west-2\",
+                  \"operation\": \"${{ inputs.action }}\"
+                }
+              }"
+
+            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
+          done
 
 ###########################################################
-# ================= MANUAL – PROD EAST ===================
+# ===================== PROD EAST ========================
 ###########################################################
+  plan-east:
+    if: inputs.environment == 'prod-east'
+    runs-on: ubuntu-latest
+    outputs:
+      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
+    steps:
+      - uses: actions/checkout@v4
 
-  approval-prod-east:
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'prod-east'
-    name: Approval – prod-east
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x yq_linux_amd64
+          sudo mv yq_linux_amd64 /usr/local/bin/yq
+
+      - name: Configure AWS (east)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Download manifest
+        run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
+
+      - name: Build summary
+        id: plan
+        run: |
+          set -euo pipefail
+          DATA=$(yq -o=json ".\"us-east-1\"" manifest.yaml)
+          PLAN_JSON='[]'
+
+          echo "## prod-east Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
+
+          for repo in repo-a repo-b repo-c; do
+            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
+            [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
+            echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
+            PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
+          done
+
+          echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+  approve-east:
+    if: inputs.environment == 'prod-east'
+    needs: plan-east
     runs-on: ubuntu-latest
     environment: prod-east
     steps:
       - run: echo "Approved prod-east"
 
-  deploy-prod-east:
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'prod-east'
-    name: ${{ inputs.operation == 'rollback' && 'Rollback' || 'Deploy' }} – prod-east
-    needs: approval-prod-east
-    uses: vasunaidu-2/shared-workflows/.github/workflows/shared-deploy.yml@main
-    with:
-      service: ${{ github.event.repository.name }}
-      tag: ${{ inputs.tag }}
-      environment: prod-east
-      region: us-east-1
-      operation: ${{ inputs.operation }}
-
-###########################################################
-# ============= ORCHESTRATOR – PROD WEST =================
-###########################################################
-
-  deploy-auto-prod-west:
-    if: github.event_name == 'repository_dispatch' && github.event.client_payload.environment == 'prod-west'
-    name: ${{ github.event.client_payload.operation == 'rollback' && 'Rollback' || 'Deploy' }} – prod-west (orchestrated)
-    uses: vasunaidu-2/shared-workflows/.github/workflows/shared-deploy.yml@main
-    with:
-      service: ${{ github.event.repository.name }}
-      tag: ${{ github.event.client_payload.tag }}
-      environment: prod-west
-      region: us-west-2
-      operation: ${{ github.event.client_payload.operation }}
-
-###########################################################
-# ============= ORCHESTRATOR – PROD EAST =================
-###########################################################
-
-  deploy-auto-prod-east:
-    if: github.event_name == 'repository_dispatch' && github.event.client_payload.environment == 'prod-east'
-    name: ${{ github.event.client_payload.operation == 'rollback' && 'Rollback' || 'Deploy' }} – prod-east (orchestrated)
+  trigger-east:
+    if: inputs.environment == 'prod-east'
+    needs: [plan-east, approve-east]
     runs-on: ubuntu-latest
     steps:
-
-      # ✅ ONLY SHOW SUMMARY FOR WEST → EAST
-      - name: Show west → east sequence summary
-        if: github.event.client_payload.sequence == 'west-followed-by-east'
+      - name: Trigger repos (east)
         run: |
-          echo "## 🌍 Deployment Sequence: WEST → EAST" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ prod-west deployment completed before this prod-east run." >> $GITHUB_STEP_SUMMARY
+          set -euo pipefail
+          PLAN=$(echo "${{ needs.plan-east.outputs.plan_b64 }}" | base64 -d)
 
-      # ✅ Call your reusable workflow
-      - name: Deploy prod-east
-        uses: vasunaidu-2/shared-workflows/.github/workflows/shared-deploy.yml@main
+          echo "## prod-east Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Workflow |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|----------|" >> "$GITHUB_STEP_SUMMARY"
+
+          mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
+          for entry in "${REPOS[@]}"; do
+            REPO="${entry%%|*}"
+            VERSION="${entry##*|}"
+
+            curl -f -X POST \
+              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/vasunaidu-1/$REPO/dispatches \
+              -d "{
+                \"event_type\": \"prod-deploy\",
+                \"client_payload\": {
+                  \"tag\": \"$VERSION\",
+                  \"environment\": \"prod-east\",
+                  \"region\": \"us-east-1\",
+                  \"operation\": \"${{ inputs.action }}\"
+                }
+              }"
+
+            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+###########################################################
+# ========== PROD WEST → PROD EAST ========================
+###########################################################
+  plan-east-after-west:
+    if: inputs.environment == 'prod-west-followed-by-prod-east'
+    needs: trigger-west
+    runs-on: ubuntu-latest
+    outputs:
+      plan_b64: ${{ steps.plan.outputs.plan_b64 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x yq_linux_amd64
+          sudo mv yq_linux_amd64 /usr/local/bin/yq
+
+      - name: Configure AWS (east)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          service: ${{ github.event.repository.name }}
-          tag: ${{ github.event.client_payload.tag }}
-          environment: prod-east
-          region: us-east-1
-          operation: ${{ github.event.client_payload.operation }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Download manifest
+        run: aws s3 cp s3://mos-deploy-manifests/${{ inputs.action }}-manifest.yaml manifest.yaml
+
+      - name: Build summary
+        id: plan
+        run: |
+          set -euo pipefail
+          DATA=$(yq -o=json ".\"us-east-1\"" manifest.yaml)
+          PLAN_JSON='[]'
+
+          echo "## prod-east Build & Release Plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Version |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|---------|" >> "$GITHUB_STEP_SUMMARY"
+
+          for repo in repo-a repo-b repo-c; do
+            VERSION=$(echo "$DATA" | jq -r ".\"$repo\".version // empty")
+            [[ -z "$VERSION" || "$VERSION" == "NA" || "$VERSION" == "null" ]] && continue
+            echo "| $repo | v$VERSION |" >> "$GITHUB_STEP_SUMMARY"
+            PLAN_JSON=$(echo "$PLAN_JSON" | jq ". + [{\"repo\":\"$repo\",\"version\":\"$VERSION\"}]")
+          done
+
+          echo "plan_b64=$(echo "$PLAN_JSON" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+  approve-east-after-west:
+    if: inputs.environment == 'prod-west-followed-by-prod-east'
+    needs: plan-east-after-west
+    runs-on: ubuntu-latest
+    environment: prod-east
+    steps:
+      - run: echo "Approved prod-east"
+
+  trigger-east-after-west:
+    if: inputs.environment == 'prod-west-followed-by-prod-east'
+    needs: [plan-east-after-west, approve-east-after-west]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger repos (east)
+        run: |
+          set -euo pipefail
+          PLAN=$(echo "${{ needs.plan-east-after-west.outputs.plan_b64 }}" | base64 -d)
+
+          echo "## prod-east Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | Workflow |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|----------|" >> "$GITHUB_STEP_SUMMARY"
+
+          mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
+          for entry in "${REPOS[@]}"; do
+            REPO="${entry%%|*}"
+            VERSION="${entry##*|}"
+
+            curl -f -X POST \
+              -H "Authorization: Bearer ${{ secrets.ORG1_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/vasunaidu-1/$REPO/dispatches \
+              -d "{
+                \"event_type\": \"prod-deploy\",
+                \"client_payload\": {
+                  \"tag\": \"$VERSION\",
+                  \"environment\": \"prod-east\",
+                  \"region\": \"us-east-1\",
+                  \"operation\": \"${{ inputs.action }}\"
+                }
+              }"
+
+            echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
+          done
