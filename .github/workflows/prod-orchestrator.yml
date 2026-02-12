@@ -90,6 +90,7 @@ jobs:
           echo "|------|----------|" >> "$GITHUB_STEP_SUMMARY"
 
           mapfile -t REPOS < <(echo "$PLAN" | jq -r '.[] | "\(.repo)|\(.version)"')
+
           for entry in "${REPOS[@]}"; do
             REPO="${entry%%|*}"
             VERSION="${entry##*|}"
@@ -207,7 +208,7 @@ jobs:
 
             echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
 
-            echo "Waiting for $REPO deployment to complete..."
+            echo "Waiting for $REPO to complete..."
 
             while true; do
               STATUS=$(curl -s \
