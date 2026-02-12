@@ -271,6 +271,14 @@ jobs:
           set -euo pipefail
           PLAN=$(echo "${{ needs.plan-east-after-west.outputs.plan_b64 }}" | base64 -d)
 
+          # ✅ ADDED SUMMARY (ONLY ADDITION)
+          echo "## Deployment Status" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| prod-west | ✅ Already Deployed |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| prod-east | ✅ Deployed |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
           echo "## prod-east Repositories Triggered" >> "$GITHUB_STEP_SUMMARY"
           echo "| Repo | Workflow |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|----------|" >> "$GITHUB_STEP_SUMMARY"
