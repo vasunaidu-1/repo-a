@@ -1,4 +1,4 @@
-name: Prod Orchestrator
+name: Prod Orchestrator time
 run-name: prod-orchestrator-${{ inputs.action }}
 
 on:
@@ -18,9 +18,7 @@ on:
 
 jobs:
 
-###########################################################
-# ===================== PROD WEST ========================
-###########################################################
+# PROD WEST 
 
   plan-west:
     if: inputs.environment == 'prod-west' || inputs.environment == 'prod-west-followed-by-prod-east'
@@ -99,9 +97,8 @@ jobs:
               }"
             echo "| $REPO | https://github.com/vasunaidu-1/$REPO/actions |" >> "$GITHUB_STEP_SUMMARY"
           done
-###########################################################
-# ===================== PROD EAST ========================
-###########################################################
+
+# PROD EAST
 
   plan-east:
     if: inputs.environment == 'prod-east'
@@ -195,9 +192,8 @@ jobs:
             END_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
             echo "| $REPO | $START_TIME | $END_TIME | https://github.com/vasunaidu-1/$REPO/actions/runs/$RUN_ID |" >> "$GITHUB_STEP_SUMMARY"
           done
-###########################################################
-# ========== PROD WEST → PROD EAST ========================
-###########################################################
+
+# PROD WEST → PROD EAST
 
   plan-east-after-west:
     if: inputs.environment == 'prod-west-followed-by-prod-east'
